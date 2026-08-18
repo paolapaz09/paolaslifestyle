@@ -223,15 +223,30 @@ async function refreshSession(refresh_token){
     return res.json();
   }catch(e){ return null; }
 }
+// ---------- Storage helper (works inside Claude artifacts AND on standalone GitHub Pages) ----------
+async function storageSet(key, value){
+  try{ if(window.storage){ await window.storage.set(key, value, false); return; } }catch(e){}
+  try{ localStorage.setItem(key, value); }catch(e){}
+}
+async function storageGet(key){
+  try{ if(window.storage){ const r = await window.storage.get(key); return r ? r.value : null; } }catch(e){}
+  try{ return localStorage.getItem(key); }catch(e){}
+  return null;
+}
+async function storageDelete(key){
+  try{ if(window.storage){ await window.storage.delete(key, false); return; } }catch(e){}
+  try{ localStorage.removeItem(key); }catch(e){}
+}
+
 async function saveSession(s){
   session = s;
-  try{ await window.storage.set('session', JSON.stringify({refresh_token: s.refresh_token}), false); }catch(e){}
+  try{ await storageSet('session', JSON.stringify({refresh_token: s.refresh_token})); }catch(e){}
 }
 async function loadSession(){
   try{
-    const r = await window.storage.get('session');
-    if(r && r.value){
-      const {refresh_token} = JSON.parse(r.value);
+    const raw = await storageGet('session');
+    if(raw){
+      const {refresh_token} = JSON.parse(raw);
       const fresh = await refreshSession(refresh_token);
       if(fresh && fresh.access_token){ session = fresh; return true; }
     }
@@ -239,7 +254,7 @@ async function loadSession(){
   return false;
 }
 async function signOut(){
-  try{ await window.storage.delete('session', false); }catch(e){}
+  try{ await storageDelete('session'); }catch(e){}
   session = null; profile = null;
   render();
 }
@@ -658,28 +673,31 @@ async function renderFood(panel){
 }
 function macroDonut(totals){
   const pCal = totals.p*4, cCal = totals.c*4, fCal = totals.f*9;
-  const sum = pCal + cCal + fCal;
-  if(sum <= 0) return `<p class="empty-state">Log some food to see your macro split.</p>`;
+  const macroSum = pCal + cCal + fCal;
+  if(macroSum <= 0 && totals.cal <= 0) return `<p class="empty-state">Log some food to see your macro split.</p>`;
+  if(macroSum <= 0) return `<p class="empty-state">You've logged ${Math.round(totals.cal)} calories, but no protein/carb/fat yet — fill in macros on your entries to see the split.</p>`;
   const colors = {protein:'var(--sage-600)', carbs:'var(--gold)', fat:'var(--rust)'};
   const slices = [['protein',pCal],['carbs',cCal],['fat',fCal]];
   const r = 60, cx = 70, cy = 70, circumference = 2*Math.PI*r;
   let offset = 0;
   const paths = slices.map(([name,val]) => {
-    const frac = val/sum;
+    const frac = val/macroSum;
     const dash = frac*circumference;
     const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${colors[name]}" stroke-width="18" stroke-dasharray="${dash} ${circumference-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
     offset += dash;
     return seg;
   }).join('');
+  const mismatch = Math.abs(totals.cal - macroSum) > 25;
   return `
     <div class="donut-wrap">
-      <svg width="140" height="140" viewBox="0 0 140 140">${paths}<text x="70" y="74" text-anchor="middle" font-family="Fraunces,serif" font-size="16" fill="var(--ink)">${Math.round(sum)} cal</text></svg>
+      <svg width="140" height="140" viewBox="0 0 140 140">${paths}<text x="70" y="74" text-anchor="middle" font-family="Fraunces,serif" font-size="16" fill="var(--ink)">${Math.round(totals.cal)} cal</text></svg>
       <div class="donut-legend">
-        <div class="legend-item"><span class="legend-dot" style="background:var(--sage-600);"></span>Protein — ${Math.round(totals.p)}g (${Math.round(pCal/sum*100)}%)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:var(--gold);"></span>Carbs — ${Math.round(totals.c)}g (${Math.round(cCal/sum*100)}%)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:var(--rust);"></span>Fat — ${Math.round(totals.f)}g (${Math.round(fCal/sum*100)}%)</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--sage-600);"></span>Protein — ${Math.round(totals.p)}g (${Math.round(pCal/macroSum*100)}%)</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--gold);"></span>Carbs — ${Math.round(totals.c)}g (${Math.round(cCal/macroSum*100)}%)</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--rust);"></span>Fat — ${Math.round(totals.f)}g (${Math.round(fCal/macroSum*100)}%)</div>
       </div>
-    </div>`;
+    </div>
+    ${mismatch ? `<p class="serving-note" style="margin-top:14px;">Heads up: your macros add up to ${Math.round(macroSum)} cal, but your logged total is ${Math.round(totals.cal)} cal — likely one or more entries has calories filled in without protein/carb/fat. Edit those entries to fill in macros for a fully accurate split.</p>` : ''}`;
 }
 function foodRow(l){
   return `<div class="food-row">
@@ -780,7 +798,7 @@ async function renderProgress(panel){
 // ---------- JOURNAL ----------
 async function renderJournal(panel){
   const uid = session.user.id;
-  const entries = await supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&notes=not.is.null&order=date.desc&select=date,notes`);
+  const entries = await supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&notes=not.is.null&order=date.desc&select=date,notes,created_at`);
   const withText = entries.filter(e => e.notes && e.notes.trim());
   panel.innerHTML = `
     <div class="card">
@@ -799,7 +817,8 @@ async function renderJournal(panel){
   }
 }
 function journalEntry(e){
-  return `<div class="journal-entry"><div class="journal-date">${e.date}</div><div class="journal-text">${esc(e.notes)}</div></div>`;
+  const stamp = e.created_at ? new Date(e.created_at).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : e.date;
+  return `<div class="journal-entry"><div class="journal-date">${stamp}</div><div class="journal-text">${esc(e.notes)}</div></div>`;
 }
 
 // ---------- HABITS ----------
