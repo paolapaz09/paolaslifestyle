@@ -941,14 +941,21 @@ const WMO_CODES = {
   95:['Thunderstorm','⛈️'],96:['Thunderstorm','⛈️'],99:['Thunderstorm','⛈️']
 };
 function aqiInfo(aqi){
-  if(aqi==null) return {label:'Unknown', color:'#999'};
-  if(aqi<=50) return {label:'Good', color:'#6B9B5E'};
-  if(aqi<=100) return {label:'Moderate', color:'#C9A63B'};
-  if(aqi<=150) return {label:'Unhealthy for sensitive groups', color:'#D98B3C'};
-  if(aqi<=200) return {label:'Unhealthy', color:'#C15B4A'};
-  if(aqi<=300) return {label:'Very unhealthy', color:'#8B5A9E'};
-  return {label:'Hazardous', color:'#6B3A3A'};
+  if(aqi==null) return {label:'Unknown', color:'#999', guidance:'', who:''};
+  if(aqi<=50) return {label:'Good', color:'#6B9B5E', guidance:"Air quality is in good shape today — no real concerns. A fine day to be outside as much as you'd like.", who:'Everyone'};
+  if(aqi<=100) return {label:'Moderate', color:'#C9A63B', guidance:"Fine for most people. If you're unusually sensitive to air pollution (asthma, allergies, or you've noticed symptoms on hazier days before), you might notice something faint — otherwise, no real change to your day.", who:'Most people unaffected'};
+  if(aqi<=150) return {label:'Unhealthy for sensitive groups', color:'#D98B3C', guidance:"Most people are fine, but if you have asthma, a respiratory condition, are pregnant, or tend to react to air quality, it's worth shortening or lightening up outdoor exercise today.", who:'Sensitive groups should take it easier outdoors'};
+  if(aqi<=200) return {label:'Unhealthy', color:'#C15B4A', guidance:"Everyone may start to notice effects — think throat irritation, tiredness, shortness of breath during activity. Worth moving harder workouts indoors today, especially if you're already feeling inflamed or run down.", who:'Everyone may notice effects'};
+  if(aqi<=300) return {label:'Very unhealthy', color:'#8B5A9E', guidance:"This is a health alert level. Limit outdoor time and exertion for everyone, not just sensitive groups — this is a good day to keep workouts indoors.", who:'Everyone should limit outdoor exertion'};
+  return {label:'Hazardous', color:'#6B3A3A', guidance:"Emergency-level air quality. Stay indoors as much as you can today and avoid outdoor exertion entirely.", who:'Everyone should stay indoors'};
 }
+
+const POLLUTANT_GLOSSARY = {
+  'PM2.5': "Tiny particles (from smoke, vehicle exhaust, dust) small enough to get deep into your lungs and bloodstream. This is usually the pollutant that drives the AQI number day to day, and it's the one most linked to inflammation in the body.",
+  'PM10': "Slightly larger particles — dust, pollen fragments, mold spores. These mostly irritate your nose, throat, and airways rather than going as deep as PM2.5.",
+  'Ozone': "Ground-level ozone (different from the protective ozone layer way up in the atmosphere) forms from sunlight reacting with pollution. It tends to peak on hot, sunny afternoons and can irritate your lungs, especially during exercise.",
+  'NO₂': "Nitrogen dioxide, mostly from vehicle exhaust and combustion. Higher near busy roads — can irritate airways, especially if you already deal with asthma or sensitivity."
+};
 
 async function renderWeather(panel){
   let zip = (await storageGet('weather_zip')) || '78254';
@@ -989,6 +996,12 @@ async function loadWeatherFor(zip){
     const a = await aRes.json();
 
     const [desc, icon] = WMO_CODES[w.current.weather_code] || ['—','🌡️'];
+    const temp = w.current.temperature_2m, humidity = w.current.relative_humidity_2m;
+    let weatherNote = '';
+    if(temp >= 90) weatherNote = "It's hot out there — hydrate well if you're heading outside, especially for a workout.";
+    else if(temp <= 45) weatherNote = "Chilly today — worth a layer if you're stepping out.";
+    else weatherNote = "Comfortable range today, nothing extreme to plan around.";
+    if(humidity >= 75) weatherNote += " Humidity is high too, so it may feel warmer than the number suggests.";
     const aqi = a.current?.us_aqi;
     const aq = aqiInfo(aqi);
 
@@ -1004,6 +1017,7 @@ async function loadWeatherFor(zip){
           <div class="ws"><b>${Math.round(w.current.relative_humidity_2m)}%</b>humidity</div>
           <div class="ws"><b>${Math.round(w.current.wind_speed_10m)}mph</b>wind</div>
         </div>
+        <p class="muted" style="margin-top:14px;">${esc(weatherNote)}</p>
       </div>
     `;
 
@@ -1022,9 +1036,26 @@ async function loadWeatherFor(zip){
         <div class="pollutant-item"><b>${a.current?.ozone?.toFixed(0) ?? '—'}</b><span>Ozone</span></div>
         <div class="pollutant-item"><b>${a.current?.nitrogen_dioxide?.toFixed(0) ?? '—'}</b><span>NO₂</span></div>
       </div>
-      <p class="muted" style="margin-top:14px;">Weather and pollutant data from Open-Meteo. Specific pollen counts (tree/grass/weed) aren't covered for U.S. locations by this free source — let me know if you'd like to add a dedicated pollen provider later.</p>
     `;
     body.parentElement.appendChild(aqCard);
+
+    const interpretCard = document.createElement('div');
+    interpretCard.className = 'card';
+    interpretCard.innerHTML = `
+      <h2 class="section-title">What this means for you</h2>
+      <p style="font-size:14px;line-height:1.6;">${esc(aq.guidance)}</p>
+      <p class="muted" style="margin-top:8px;"><b>${esc(aq.who)}.</b> The AQI number is a single score built from whichever pollutant is currently worst — here's what each one below it actually is:</p>
+      <div style="margin-top:14px;">
+        ${Object.entries(POLLUTANT_GLOSSARY).map(([name,desc]) => `
+          <div style="margin-bottom:12px;">
+            <div style="font-weight:600;font-size:13.5px;color:var(--sage-700);">${esc(name)}</div>
+            <div style="font-size:13px;color:var(--ink-soft);line-height:1.5;">${esc(desc)}</div>
+          </div>
+        `).join('')}
+      </div>
+      <p class="muted" style="margin-top:8px;">Weather and pollutant data from Open-Meteo. Specific pollen counts (tree/grass/weed) aren't covered for U.S. locations by this free source — let me know if you'd like to add a dedicated pollen provider later.</p>
+    `;
+    body.parentElement.appendChild(interpretCard);
   }catch(e){
     body.innerHTML = `<p class="auth-error">Couldn't load conditions right now — check your connection and try again.</p>`;
   }
