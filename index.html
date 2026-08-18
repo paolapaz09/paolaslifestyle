@@ -149,6 +149,19 @@
   .refresh-verse{background:none;border:1px solid var(--gold);color:var(--gold);border-radius:18px;padding:6px 16px;font-size:12px;font-weight:600;margin-top:16px;}
   .refresh-verse:hover{background:var(--gold);color:#fff;}
   .declaration{font-size:13px;color:var(--ink-soft);margin-top:12px;font-style:normal;padding-top:12px;border-top:1px solid var(--line);}
+  .date-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+  .date-nav-btn{background:var(--sage-100);border:none;color:var(--sage-700);width:34px;height:34px;border-radius:50%;font-size:16px;display:flex;align-items:center;justify-content:center;}
+  .date-nav-btn:hover{background:var(--sage-200);}
+  .date-nav-btn:disabled{opacity:0.35;cursor:default;}
+  .date-nav-label{text-align:center;}
+  .date-nav-label .big{font-family:'Fraunces',serif;font-size:17px;color:var(--sage-700);}
+  .date-nav-label .small{font-size:11px;color:var(--ink-soft);}
+  .jump-today{background:none;border:none;color:var(--sage-600);font-size:12px;text-decoration:underline;margin-top:2px;}
+  .add-toggle.active{background:var(--sage-600);color:#fff;}
+  .journal-entry{padding:12px 0;border-bottom:1px solid var(--line);}
+  .journal-entry:last-child{border-bottom:none;}
+  .journal-date{font-size:12px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:0.3px;}
+  .journal-text{font-size:14px;margin-top:4px;line-height:1.5;}
   .add-toggle{background:var(--sage-100);color:var(--sage-700);border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;}
   .add-toggle:hover{background:var(--sage-200);}
   .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
@@ -274,6 +287,7 @@ const TABS = [
   {id:'inflammatory', label:'Inflammatory'},
   {id:'progress', label:'Progress'},
   {id:'habits', label:'Habits'},
+  {id:'journal', label:'Journal'},
   {id:'scripture', label:'Scripture'},
 ];
 
@@ -292,6 +306,7 @@ async function renderPanel(){
     else if(activeTab==='inflammatory') await renderInflammatory(panel);
     else if(activeTab==='progress') await renderProgress(panel);
     else if(activeTab==='habits') await renderHabits(panel);
+    else if(activeTab==='journal') await renderJournal(panel);
     else if(activeTab==='scripture') await renderScripture(panel);
   }catch(e){
     panel.innerHTML = `<div class="card"><p class="auth-error">Something went wrong: ${esc(e.message)}</p></div>`;
@@ -341,42 +356,70 @@ function renderAuth(){
 }
 
 // ---------- TODAY ----------
+let selectedDate = todayStr();
+function addDays(dateStr, n){
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0,10);
+}
+function formatDateLabel(dateStr){
+  if(dateStr === todayStr()) return {big:'Today', small: new Date(dateStr+'T00:00:00').toLocaleDateString(undefined,{weekday:'long', month:'short', day:'numeric'})};
+  if(dateStr === addDays(todayStr(),-1)) return {big:'Yesterday', small: new Date(dateStr+'T00:00:00').toLocaleDateString(undefined,{weekday:'long', month:'short', day:'numeric'})};
+  return {big: new Date(dateStr+'T00:00:00').toLocaleDateString(undefined,{weekday:'long', month:'short', day:'numeric'}), small: dateStr};
+}
 async function renderToday(panel){
   const uid = session.user.id;
   const [checkins, habits, logs] = await Promise.all([
-    supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&date=eq.${todayStr()}&select=*`),
+    supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&date=eq.${selectedDate}&select=*`),
     supa(`/rest/v1/habits?user_id=eq.${uid}&active=eq.true&order=created_at.asc&select=*`),
-    supa(`/rest/v1/habit_logs?user_id=eq.${uid}&date=eq.${todayStr()}&select=*`),
+    supa(`/rest/v1/habit_logs?user_id=eq.${uid}&date=eq.${selectedDate}&select=*`),
   ]);
   const checkin = checkins[0] || {};
   const doneMap = {};
   logs.forEach(l => doneMap[l.habit_id] = l.completed);
+  const label = formatDateLabel(selectedDate);
+  const isFuture = selectedDate >= todayStr();
 
   panel.innerHTML = `
+    <div class="card">
+      <div class="date-nav">
+        <button class="date-nav-btn" id="prev-day">‹</button>
+        <div class="date-nav-label">
+          <div class="big">${label.big}</div>
+          <div class="small">${label.small}</div>
+          ${selectedDate !== todayStr() ? `<button class="jump-today" id="jump-today">Jump to today</button>` : ''}
+        </div>
+        <button class="date-nav-btn" id="next-day" ${isFuture?'disabled':''}>›</button>
+      </div>
+    </div>
     <div class="row">
       <div class="card">
-        <h2 class="section-title">Daily check-in</h2>
+        <h2 class="section-title">Check-in</h2>
         <div class="field"><label>Weight (lbs)</label><input type="number" step="0.1" id="ci-weight" value="${checkin.weight ?? ''}" placeholder="${profile.starting_weight}"></div>
-        <div class="field"><label>Notes</label><textarea id="ci-notes" rows="2" placeholder="How are you feeling today?">${esc(checkin.notes||'')}</textarea></div>
+        <div class="field"><label>Dream / journal entry</label><textarea id="ci-notes" rows="3" placeholder="Anything on your heart or mind today — a dream, a reflection, a goal you're working toward.">${esc(checkin.notes||'')}</textarea></div>
         <button class="btn btn-primary" id="save-checkin">Save check-in</button>
       </div>
       <div class="card">
-        <h2 class="section-title">Habits today</h2>
+        <h2 class="section-title">Habits</h2>
         <div id="habit-list">${habits.length ? habits.map(h => habitRow(h, doneMap[h.id])).join('') : `<p class="empty-state">No habits yet — add some in the Habits tab.</p>`}</div>
       </div>
     </div>
   `;
+  $('#prev-day').onclick = () => { selectedDate = addDays(selectedDate,-1); renderToday(panel); };
+  $('#next-day').onclick = () => { if(!isFuture) { selectedDate = addDays(selectedDate,1); renderToday(panel); } };
+  const jumpBtn = $('#jump-today');
+  if(jumpBtn) jumpBtn.onclick = () => { selectedDate = todayStr(); renderToday(panel); };
   $('#save-checkin').onclick = async () => {
     const weight = $('#ci-weight').value ? parseFloat($('#ci-weight').value) : null;
     const notes = $('#ci-notes').value;
-    await supa(`/rest/v1/daily_checkins?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, date:todayStr(), weight, notes})});
+    await supa(`/rest/v1/daily_checkins?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, date:selectedDate, weight, notes})});
     renderToday(panel);
   };
   panel.querySelectorAll('.checkbox').forEach(cb => {
     cb.onclick = async () => {
       const habitId = cb.dataset.habit;
       const nowDone = cb.classList.contains('done');
-      await supa(`/rest/v1/habit_logs?on_conflict=habit_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, habit_id:habitId, date:todayStr(), completed: !nowDone})});
+      await supa(`/rest/v1/habit_logs?on_conflict=habit_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, habit_id:habitId, date:selectedDate, completed: !nowDone})});
       renderToday(panel);
     };
   });
@@ -428,10 +471,14 @@ async function renderFood(panel){
     await supa(`/rest/v1/food_logs?id=eq.${b.dataset.id}`, {method:'DELETE'});
     renderFood(panel);
   });
-  $('#mode-search').onclick = () => renderManualArea('search');
-  $('#mode-scan').onclick = () => renderManualArea('scan');
-  $('#mode-manual').onclick = () => renderManualArea('manual');
-  renderManualArea('manual');
+  function setActiveToggle(mode){
+    ['search','scan','manual'].forEach(m => $('#mode-'+m).classList.toggle('active', m===mode));
+  }
+  $('#mode-search').onclick = () => { setActiveToggle('search'); renderManualArea('search'); };
+  $('#mode-scan').onclick = () => { setActiveToggle('scan'); renderManualArea('scan'); };
+  $('#mode-manual').onclick = () => { setActiveToggle('manual'); renderManualArea('manual'); };
+  setActiveToggle('search');
+  renderManualArea('search');
 
   function renderManualArea(mode){
     const area = $('#add-food-area');
@@ -453,23 +500,38 @@ async function renderFood(panel){
           const data = await res.json();
           const foods = data.foods || [];
           $('#usda-results').innerHTML = foods.length ? foods.map((f,i)=>`<div class="search-result" data-idx="${i}">${esc(f.description)}</div>`).join('') : '<p class="muted">No results.</p>';
-          $('#usda-results').querySelectorAll('.search-result').forEach(el => el.onclick = () => {
+          $('#usda-results').querySelectorAll('.search-result').forEach(el => el.onclick = async () => {
             const f = foods[el.dataset.idx];
-            const getN = name => (f.foodNutrients.find(n => (n.nutrientName||'').includes(name))||{}).value || 0;
-            let servingLabel = 'per 100g (USDA standard reference amount)';
-            if(f.servingSize && f.servingSizeUnit){
-              servingLabel = `per label serving: ${f.servingSize}${f.servingSizeUnit}`;
-              if(f.householdServingFullText) servingLabel += ` (${f.householdServingFullText})`;
-            }
-            pendingFood = {
-              food_name: f.description,
-              calories: getN('Energy'),
-              protein: getN('Protein'),
-              carbs: getN('Carbohydrate'),
-              fat: getN('Total lipid'),
-              source: 'usda',
-              servingLabel
-            };
+            area.innerHTML = `<p class="muted">Loading serving details for ${esc(f.description)}…</p>`;
+            let base100 = {calories:0, protein:0, carbs:0, fat:0};
+            let portions = [];
+            try{
+              const dRes = await fetch(`https://api.nal.usda.gov/fdc/v1/food/${f.fdcId}?api_key=${USDA_KEY}`);
+              const detail = await dRes.json();
+              const getAmt = (name) => {
+                const list = detail.foodNutrients || [];
+                const match = list.find(n => (n.nutrientName || n.nutrient?.name || '').toLowerCase().includes(name.toLowerCase()));
+                return match ? (match.value ?? match.amount ?? 0) : 0;
+              };
+              base100 = {
+                calories: getAmt('Energy'),
+                protein: getAmt('Protein'),
+                carbs: getAmt('Carbohydrate'),
+                fat: getAmt('Total lipid')
+              };
+              if(detail.servingSize && detail.servingSizeUnit){
+                let label = `Label serving (${detail.servingSize}${detail.servingSizeUnit})`;
+                if(detail.householdServingFullText) label += ` — ${detail.householdServingFullText}`;
+                portions.push({label, grams: detail.servingSizeUnit==='g' ? detail.servingSize : 100});
+              }
+              (detail.foodPortions || []).forEach(p => {
+                if(!p.gramWeight) return;
+                const desc = [p.amount, p.modifier || p.portionDescription].filter(Boolean).join(' ') || `${p.gramWeight}g portion`;
+                portions.push({label: `${desc} (${Math.round(p.gramWeight)}g)`, grams: p.gramWeight});
+              });
+            }catch(e){ /* fall through to 100g default below */ }
+            portions.push({label:'100 g (standard reference)', grams:100});
+            pendingFood = { food_name: f.description, source:'usda', base100, portions };
             area.innerHTML = manualFormHtml(pendingFood);
             wireManualForm();
           });
@@ -485,14 +547,22 @@ async function renderFood(panel){
         area.innerHTML = `<p class="auth-error">This browser doesn't support camera access. Try Chrome or Safari, or use manual entry / search instead.</p>`;
         return;
       }
-      const qr = new Html5Qrcode('reader');
-      qr.start({facingMode:'environment'}, {fps:10, qrbox:220}, async (decoded) => {
-        qr.stop();
-        area.innerHTML = `<p class="muted">Looking up product…</p>`;
+      const qr = new Html5Qrcode('reader', { formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.QR_CODE
+      ], verbose: false });
+      let scanned = false;
+      qr.start({facingMode:'environment'}, {fps:10, qrbox:{width:260,height:130}}, async (decoded) => {
+        if(scanned) return;
+        scanned = true;
+        qr.stop().catch(()=>{});
+        area.innerHTML = `<p class="muted">Found code ${esc(decoded)} — looking up product…</p>`;
         try{
           const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${decoded}.json`);
           const data = await res.json();
-          if(data.status !== 1){ area.innerHTML = `<p class="auth-error">Product not found. Try manual entry.</p>`; return; }
+          if(data.status !== 1){ area.innerHTML = `<p class="auth-error">Code ${esc(decoded)} scanned, but no product found in Open Food Facts. Try manual entry.</p>`; return; }
           const p = data.product;
           const n = p.nutriments || {};
           pendingFood = {
@@ -509,7 +579,7 @@ async function renderFood(panel){
           area.innerHTML = manualFormHtml(pendingFood);
           wireManualForm();
         }catch(e){ area.innerHTML = `<p class="auth-error">Lookup failed — check your connection and try again.</p>`; }
-      }, ()=>{}).catch((err)=>{
+      }, ()=>{ /* fires continuously while no code is found yet — expected, not an error */ }).catch((err)=>{
         const msg = (err && err.toString) ? err.toString() : 'Unknown error';
         area.innerHTML = `<p class="auth-error">Camera couldn't start: ${esc(msg)}</p>
           <p class="muted">Most likely fix: tap the padlock/site-info icon next to the address bar → Site settings → Camera → Allow. Then reload this page. If you're viewing this inside a Claude conversation instead of the GitHub Pages link, camera access won't work there — open your github.io link directly.</p>`;
@@ -518,6 +588,16 @@ async function renderFood(panel){
   }
 
   function manualFormHtml(prefill={}){
+    const hasPortions = prefill.portions && prefill.portions.length;
+    let cal=prefill.calories||0, p=prefill.protein||0, c=prefill.carbs||0, f=prefill.fat||0;
+    if(hasPortions && prefill.base100){
+      const grams = prefill.portions[0].grams;
+      const mult = grams/100;
+      cal = Math.round(prefill.base100.calories*mult);
+      p = Math.round(prefill.base100.protein*mult);
+      c = Math.round(prefill.base100.carbs*mult);
+      f = Math.round(prefill.base100.fat*mult);
+    }
     return `
       <div class="row">
         <div class="field" style="flex:2;min-width:180px;"><label>Food name</label><input type="text" id="f-name" value="${esc(prefill.food_name||'')}"></div>
@@ -525,21 +605,37 @@ async function renderFood(panel){
           <select id="f-meal"><option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option></select>
         </div>
       </div>
-      ${prefill.servingLabel ? `<p class="serving-note">Base values shown below are ${esc(prefill.servingLabel)}.</p>` : ''}
+      ${hasPortions ? `
+        <div class="field">
+          <label>Serving size</label>
+          <select id="f-portion">${prefill.portions.map((po,i)=>`<option value="${i}">${esc(po.label)}</option>`).join('')}</select>
+        </div>
+      ` : (prefill.servingLabel ? `<p class="serving-note">Base values shown below are ${esc(prefill.servingLabel)}.</p>` : '')}
       <div class="row">
-        <div class="field"><label>Calories</label><input type="number" id="f-cal" value="${prefill.calories||''}"></div>
-        <div class="field"><label>Protein (g)</label><input type="number" id="f-p" value="${prefill.protein||''}"></div>
-        <div class="field"><label>Carbs (g)</label><input type="number" id="f-c" value="${prefill.carbs||''}"></div>
-        <div class="field"><label>Fat (g)</label><input type="number" id="f-f" value="${prefill.fat||''}"></div>
+        <div class="field"><label>Calories</label><input type="number" id="f-cal" value="${cal||''}"></div>
+        <div class="field"><label>Protein (g)</label><input type="number" id="f-p" value="${p||''}"></div>
+        <div class="field"><label>Carbs (g)</label><input type="number" id="f-c" value="${c||''}"></div>
+        <div class="field"><label>Fat (g)</label><input type="number" id="f-f" value="${f||''}"></div>
       </div>
-      <div class="field" style="max-width:220px;">
+      <div class="field" style="max-width:260px;">
         <label>How many servings did you have?</label>
-        <div class="qty-row"><input type="number" id="f-qty" value="1" step="0.25" min="0.1"><span class="muted">× the values above</span></div>
+        <div class="qty-row"><input type="number" id="f-qty" value="1" step="0.25" min="0.1"><span class="muted">× the serving above</span></div>
       </div>
       <button class="btn btn-primary" id="save-food" style="width:auto;padding:11px 26px;">Add to today's log</button>
     `;
   }
   function wireManualForm(){
+    const portionSelect = $('#f-portion');
+    if(portionSelect && pendingFood?.base100){
+      portionSelect.onchange = () => {
+        const grams = pendingFood.portions[portionSelect.value].grams;
+        const mult = grams/100;
+        $('#f-cal').value = Math.round(pendingFood.base100.calories*mult);
+        $('#f-p').value = Math.round(pendingFood.base100.protein*mult);
+        $('#f-c').value = Math.round(pendingFood.base100.carbs*mult);
+        $('#f-f').value = Math.round(pendingFood.base100.fat*mult);
+      };
+    }
     $('#save-food').onclick = async () => {
       const qty = parseFloat($('#f-qty')?.value) || 1;
       const body = {
@@ -679,6 +775,31 @@ async function renderProgress(panel){
       ${chartSvg}
     </div>
   `;
+}
+
+// ---------- JOURNAL ----------
+async function renderJournal(panel){
+  const uid = session.user.id;
+  const entries = await supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&notes=not.is.null&order=date.desc&select=date,notes`);
+  const withText = entries.filter(e => e.notes && e.notes.trim());
+  panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">Dream & journal log</h2>
+      <div class="field"><input type="text" id="journal-search" placeholder="Search your entries…"></div>
+      <div id="journal-results">${withText.length ? withText.map(journalEntry).join('') : `<p class="empty-state">Nothing saved yet — write something in today's check-in and it'll show up here.</p>`}</div>
+    </div>
+  `;
+  const searchInput = $('#journal-search');
+  if(searchInput){
+    searchInput.oninput = () => {
+      const q = searchInput.value.toLowerCase();
+      const filtered = withText.filter(e => e.notes.toLowerCase().includes(q) || e.date.includes(q));
+      $('#journal-results').innerHTML = filtered.length ? filtered.map(journalEntry).join('') : `<p class="empty-state">No entries match.</p>`;
+    };
+  }
+}
+function journalEntry(e){
+  return `<div class="journal-entry"><div class="journal-date">${e.date}</div><div class="journal-text">${esc(e.notes)}</div></div>`;
 }
 
 // ---------- HABITS ----------
