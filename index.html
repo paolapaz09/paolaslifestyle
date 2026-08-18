@@ -196,6 +196,20 @@
   .day-pill.on{background:var(--sage-600);color:#fff;border-color:var(--sage-600);}
   .reminder-time{width:110px;}
   .push-status{font-size:12.5px;color:var(--ink-soft);margin-top:8px;}
+  .weather-hero{text-align:center;padding:10px 0 4px;}
+  .weather-temp{font-family:'Fraunces',serif;font-size:52px;color:var(--sage-700);line-height:1;}
+  .weather-desc{color:var(--ink-soft);font-size:14px;margin-top:4px;}
+  .weather-sub{display:flex;justify-content:center;gap:22px;margin-top:14px;flex-wrap:wrap;}
+  .weather-sub .ws{font-size:12px;color:var(--ink-soft);text-align:center;}
+  .weather-sub .ws b{display:block;font-family:'Fraunces',serif;font-size:17px;color:var(--sage-700);}
+  .aqi-badge{display:inline-block;padding:10px 22px;border-radius:24px;color:#fff;font-family:'Fraunces',serif;font-size:22px;margin:8px 0;}
+  .aqi-label{font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-soft);}
+  .pollutant-grid{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;}
+  .pollutant-item{flex:1;min-width:90px;text-align:center;background:var(--sage-50);border-radius:10px;padding:10px 6px;}
+  .pollutant-item b{display:block;font-family:'Fraunces',serif;font-size:16px;color:var(--sage-700);}
+  .pollutant-item span{font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;}
+  .zip-row{display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;}
+  .zip-row .field{margin-bottom:0;flex:1;max-width:140px;}
   .add-toggle{background:var(--sage-100);color:var(--sage-700);border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;}
   .add-toggle:hover{background:var(--sage-200);}
   .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
@@ -392,6 +406,7 @@ const TABS = [
   {id:'food', label:'Food & Macros'},
   {id:'inflammatory', label:'Inflammatory'},
   {id:'cycle', label:'Cycle'},
+  {id:'weather', label:'Weather & Air'},
   {id:'progress', label:'Progress'},
   {id:'habits', label:'Habits'},
   {id:'journal', label:'Journal'},
@@ -412,6 +427,7 @@ async function renderPanel(){
     else if(activeTab==='food') await renderFood(panel);
     else if(activeTab==='inflammatory') await renderInflammatory(panel);
     else if(activeTab==='cycle') await renderCycle(panel);
+    else if(activeTab==='weather') await renderWeather(panel);
     else if(activeTab==='progress') await renderProgress(panel);
     else if(activeTab==='habits') await renderHabits(panel);
     else if(activeTab==='journal') await renderJournal(panel);
@@ -914,7 +930,105 @@ function journalEntry(e){
   return `<div class="journal-entry"><div class="journal-date">${stamp}</div><div class="journal-text">${esc(e.notes)}</div></div>`;
 }
 
-// ---------- CYCLE ----------
+// ---------- WEATHER & AIR ----------
+const WMO_CODES = {
+  0:['Clear sky','☀️'],1:['Mostly clear','🌤️'],2:['Partly cloudy','⛅'],3:['Overcast','☁️'],
+  45:['Foggy','🌫️'],48:['Foggy','🌫️'],
+  51:['Light drizzle','🌦️'],53:['Drizzle','🌦️'],55:['Heavy drizzle','🌧️'],
+  61:['Light rain','🌧️'],63:['Rain','🌧️'],65:['Heavy rain','🌧️'],
+  71:['Light snow','🌨️'],73:['Snow','🌨️'],75:['Heavy snow','❄️'],
+  80:['Rain showers','🌦️'],81:['Rain showers','🌦️'],82:['Violent showers','⛈️'],
+  95:['Thunderstorm','⛈️'],96:['Thunderstorm','⛈️'],99:['Thunderstorm','⛈️']
+};
+function aqiInfo(aqi){
+  if(aqi==null) return {label:'Unknown', color:'#999'};
+  if(aqi<=50) return {label:'Good', color:'#6B9B5E'};
+  if(aqi<=100) return {label:'Moderate', color:'#C9A63B'};
+  if(aqi<=150) return {label:'Unhealthy for sensitive groups', color:'#D98B3C'};
+  if(aqi<=200) return {label:'Unhealthy', color:'#C15B4A'};
+  if(aqi<=300) return {label:'Very unhealthy', color:'#8B5A9E'};
+  return {label:'Hazardous', color:'#6B3A3A'};
+}
+
+async function renderWeather(panel){
+  let zip = (await storageGet('weather_zip')) || '78254';
+  panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">Local conditions</h2>
+      <div class="zip-row">
+        <div class="field"><label>Zip code</label><input type="text" id="zip-input" value="${esc(zip)}"></div>
+        <button class="btn btn-ghost" id="zip-update" style="padding:9px 18px;">Update</button>
+      </div>
+      <div id="weather-body"><p class="muted">Loading conditions for ${esc(zip)}…</p></div>
+    </div>
+  `;
+  $('#zip-update').onclick = async () => {
+    const newZip = $('#zip-input').value.trim();
+    if(!newZip) return;
+    await storageSet('weather_zip', newZip);
+    renderWeather(panel);
+  };
+  await loadWeatherFor(zip);
+}
+
+async function loadWeatherFor(zip){
+  const body = $('#weather-body');
+  try{
+    const geoRes = await fetch(`https://api.zippopotam.us/us/${encodeURIComponent(zip)}`);
+    if(!geoRes.ok){ body.innerHTML = `<p class="auth-error">Couldn't find that zip code. Double check it and try again.</p>`; return; }
+    const geo = await geoRes.json();
+    const place = geo.places[0];
+    const lat = place.latitude, lon = place.longitude;
+    const placeName = `${place['place name']}, ${place['state abbreviation']}`;
+
+    const [wRes, aRes] = await Promise.all([
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`),
+      fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide&timezone=auto`)
+    ]);
+    const w = await wRes.json();
+    const a = await aRes.json();
+
+    const [desc, icon] = WMO_CODES[w.current.weather_code] || ['—','🌡️'];
+    const aqi = a.current?.us_aqi;
+    const aq = aqiInfo(aqi);
+
+    body.innerHTML = `
+      <p class="muted" style="text-align:center;">${esc(placeName)}</p>
+      <div class="weather-hero">
+        <div style="font-size:36px;">${icon}</div>
+        <div class="weather-temp">${Math.round(w.current.temperature_2m)}°</div>
+        <div class="weather-desc">${esc(desc)}</div>
+        <div class="weather-sub">
+          <div class="ws"><b>${Math.round(w.daily.temperature_2m_max[0])}°</b>high</div>
+          <div class="ws"><b>${Math.round(w.daily.temperature_2m_min[0])}°</b>low</div>
+          <div class="ws"><b>${Math.round(w.current.relative_humidity_2m)}%</b>humidity</div>
+          <div class="ws"><b>${Math.round(w.current.wind_speed_10m)}mph</b>wind</div>
+        </div>
+      </div>
+    `;
+
+    const aqCard = document.createElement('div');
+    aqCard.className = 'card';
+    aqCard.innerHTML = `
+      <h2 class="section-title">Air quality</h2>
+      <div style="text-align:center;">
+        <div class="aqi-label">US AQI</div>
+        <div class="aqi-badge" style="background:${aq.color};">${aqi ?? '—'}</div>
+        <div class="muted">${aq.label}</div>
+      </div>
+      <div class="pollutant-grid">
+        <div class="pollutant-item"><b>${a.current?.pm2_5?.toFixed(1) ?? '—'}</b><span>PM2.5</span></div>
+        <div class="pollutant-item"><b>${a.current?.pm10?.toFixed(1) ?? '—'}</b><span>PM10</span></div>
+        <div class="pollutant-item"><b>${a.current?.ozone?.toFixed(0) ?? '—'}</b><span>Ozone</span></div>
+        <div class="pollutant-item"><b>${a.current?.nitrogen_dioxide?.toFixed(0) ?? '—'}</b><span>NO₂</span></div>
+      </div>
+      <p class="muted" style="margin-top:14px;">Weather and pollutant data from Open-Meteo. Specific pollen counts (tree/grass/weed) aren't covered for U.S. locations by this free source — let me know if you'd like to add a dedicated pollen provider later.</p>
+    `;
+    body.parentElement.appendChild(aqCard);
+  }catch(e){
+    body.innerHTML = `<p class="auth-error">Couldn't load conditions right now — check your connection and try again.</p>`;
+  }
+}
 let cycleSelectedDate = todayStr();
 const FLOW_OPTIONS = ['none','spotting','light','medium','heavy'];
 const SYMPTOM_FIELDS = [
