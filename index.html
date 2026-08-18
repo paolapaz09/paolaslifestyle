@@ -179,6 +179,15 @@
   .cycle-tags span{background:var(--sage-100);color:var(--sage-700);border-radius:10px;padding:2px 8px;font-size:11px;margin-left:4px;}
   .correlation-bar-row{margin-bottom:14px;}
   .correlation-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;}
+  .reminder-block{margin-top:8px;padding-top:8px;}
+  .reminder-toggle{background:var(--sage-100);border:none;color:var(--sage-700);border-radius:16px;padding:5px 12px;font-size:11.5px;font-weight:600;}
+  .reminder-toggle.on{background:var(--gold);color:#fff;}
+  .reminder-detail{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;}
+  .day-pills{display:flex;gap:4px;}
+  .day-pill{width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:#fff;font-size:11px;padding:0;}
+  .day-pill.on{background:var(--sage-600);color:#fff;border-color:var(--sage-600);}
+  .reminder-time{width:110px;}
+  .push-status{font-size:12.5px;color:var(--ink-soft);margin-top:8px;}
   .add-toggle{background:var(--sage-100);color:var(--sage-700);border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;}
   .add-toggle:hover{background:var(--sage-200);}
   .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
@@ -197,6 +206,63 @@
 const SUPABASE_URL = 'https://gcpeomazdqtuakjnhwqo.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_y9qqZBC3b8vNQb2rFvUduw_UD1XdJ1F';
 const USDA_KEY = '5QilVVA6mgtzzUPMCpmop9eA1z6Z1miU2IXFk1xX';
+const VAPID_PUBLIC_KEY = 'BHU1AmJlG4RX6uvM1Sf3hqTdFL6snk3ZRiZzcEnCD3d38QOaoJmhuKMH60WEFcJWO_MXAzU4ANBj6o8uQ4sI5ss';
+
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const rawData = atob(base64);
+  const arr = new Uint8Array(rawData.length);
+  for(let i=0;i<rawData.length;i++) arr[i] = rawData.charCodeAt(i);
+  return arr;
+}
+
+async function getPushSubscriptionStatus(){
+  try{
+    if(!('serviceWorker' in navigator) || !('PushManager' in window)) return 'unsupported';
+    const reg = await navigator.serviceWorker.getRegistration();
+    if(!reg) return 'off';
+    const sub = await reg.pushManager.getSubscription();
+    return sub ? 'on' : 'off';
+  }catch(e){ return 'off'; }
+}
+
+async function enablePush(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    alert("This browser doesn't support push notifications.");
+    return false;
+  }
+  try{
+    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){ alert('Notification permission was not granted — check your browser/site settings.'); return false; }
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
+    }
+    const j = sub.toJSON();
+    await supa('/rest/v1/push_subscriptions?on_conflict=endpoint', {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({
+      user_id: session.user.id, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth
+    })});
+    return true;
+  }catch(e){
+    alert('Could not enable notifications: ' + e.message);
+    return false;
+  }
+}
+async function disablePush(){
+  try{
+    const reg = await navigator.serviceWorker.getRegistration();
+    if(reg){
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){
+        await supa(`/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {method:'DELETE'});
+        await sub.unsubscribe();
+      }
+    }
+  }catch(e){}
+}
 
 let session = null;
 let profile = null;
@@ -1021,15 +1087,24 @@ async function renderCorrelation(cycleLogs){
 async function renderHabits(panel){
   const uid = session.user.id;
   const weekAgo = new Date(Date.now() - 6*86400000).toISOString().slice(0,10);
-  const [habits, weekLogs] = await Promise.all([
+  const [habits, weekLogs, reminders] = await Promise.all([
     supa(`/rest/v1/habits?user_id=eq.${uid}&order=created_at.asc&select=*`),
-    supa(`/rest/v1/habit_logs?user_id=eq.${uid}&date=gte.${weekAgo}&completed=eq.true&select=habit_id,date`)
+    supa(`/rest/v1/habit_logs?user_id=eq.${uid}&date=gte.${weekAgo}&completed=eq.true&select=habit_id,date`),
+    supa(`/rest/v1/habit_reminders?user_id=eq.${uid}&select=*`)
   ]);
   const activeHabits = habits.filter(h=>h.active);
   const countByHabit = {};
   weekLogs.forEach(l => countByHabit[l.habit_id] = (countByHabit[l.habit_id]||0) + 1);
+  const remByHabit = {};
+  reminders.forEach(r => remByHabit[r.habit_id] = r);
+  const pushStatus = await getPushSubscriptionStatus();
 
   panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">Reminders on this device</h2>
+      <p class="push-status">${pushStatus==='on' ? "Notifications are enabled on this device." : pushStatus==='unsupported' ? "This browser doesn't support push notifications." : "Turn this on to get reminders for habits you flag below."}</p>
+      ${pushStatus!=='unsupported' ? `<button class="btn btn-ghost" id="push-toggle" style="width:auto;padding:9px 20px;margin-top:8px;">${pushStatus==='on' ? 'Turn off notifications' : 'Enable notifications'}</button>` : ''}
+    </div>
     <div class="card">
       <h2 class="section-title">Add a habit</h2>
       <div class="row">
@@ -1054,13 +1129,24 @@ async function renderHabits(panel){
     <div class="card">
       <h2 class="section-title">Your habits</h2>
       ${activeHabits.length ? activeHabits.map(h => `
-        <div class="habit-item">
-          <div><div class="habit-name">${esc(h.name)}</div><div class="habit-freq">${h.target_frequency}x / week</div></div>
-          <button class="small-btn del-habit" data-id="${h.id}">Remove</button>
+        <div class="habit-item" style="flex-direction:column;align-items:stretch;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div><div class="habit-name">${esc(h.name)}</div><div class="habit-freq">${h.target_frequency}x / week</div></div>
+            <button class="small-btn del-habit" data-id="${h.id}">Remove</button>
+          </div>
+          ${habitReminderBlock(h, remByHabit[h.id])}
         </div>
       `).join('') : `<p class="empty-state">No habits yet.</p>`}
     </div>
   `;
+
+  const pushBtn = $('#push-toggle');
+  if(pushBtn) pushBtn.onclick = async () => {
+    pushBtn.disabled = true; pushBtn.textContent = 'Working…';
+    if(pushStatus==='on') await disablePush(); else await enablePush();
+    renderHabits(panel);
+  };
+
   $('#add-habit').onclick = async () => {
     const name = $('#h-name').value.trim();
     if(!name) return;
@@ -1072,6 +1158,54 @@ async function renderHabits(panel){
     await supa(`/rest/v1/habits?id=eq.${b.dataset.id}`, {method:'PATCH', body: JSON.stringify({active:false})});
     renderHabits(panel);
   });
+
+  // reminder controls per habit
+  activeHabits.forEach(h => {
+    const toggleBtn = panel.querySelector(`.reminder-toggle[data-habit="${h.id}"]`);
+    const detail = panel.querySelector(`.reminder-detail[data-habit-detail="${h.id}"]`);
+    if(!toggleBtn) return;
+    toggleBtn.onclick = async () => {
+      const rem = remByHabit[h.id];
+      if(rem && rem.enabled){
+        await supa(`/rest/v1/habit_reminders?habit_id=eq.${h.id}`, {method:'PATCH', body: JSON.stringify({enabled:false})});
+        renderHabits(panel);
+      } else {
+        detail.style.display = detail.style.display==='none' ? 'flex' : 'none';
+      }
+    };
+    detail?.querySelectorAll('.day-pill').forEach(p => p.onclick = () => p.classList.toggle('on'));
+    const saveBtn = detail?.querySelector('.save-reminder');
+    if(saveBtn) saveBtn.onclick = async () => {
+      const days = Array.from(detail.querySelectorAll('.day-pill.on')).map(p => parseInt(p.dataset.day));
+      const time = detail.querySelector('.reminder-time').value || '08:00';
+      if(days.length === 0){ alert('Pick at least one day.'); return; }
+      await supa(`/rest/v1/habit_reminders?on_conflict=habit_id`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({
+        user_id: uid, habit_id: h.id, enabled: true, days_of_week: days, reminder_time: time + ':00'
+      })});
+      renderHabits(panel);
+    };
+  });
+}
+function habitReminderBlock(h, rem){
+  const days = rem?.days_of_week || [];
+  const time = rem?.reminder_time ? rem.reminder_time.slice(0,5) : '08:00';
+  const enabled = !!(rem && rem.enabled);
+  return `
+    <div class="reminder-block">
+      <button class="reminder-toggle ${enabled?'on':''}" data-habit="${h.id}">${enabled ? `Reminder: ${DOW_LABELS(days)} at ${time}` : 'Add reminder'}</button>
+      <div class="reminder-detail" data-habit-detail="${h.id}" style="display:none;">
+        <div class="day-pills">
+          ${['Su','Mo','Tu','We','Th','Fr','Sa'].map((d,i)=>`<button class="day-pill ${days.includes(i)?'on':''}" data-day="${i}">${d}</button>`).join('')}
+        </div>
+        <input type="time" class="reminder-time" value="${time}">
+        <button class="btn-ghost save-reminder" style="padding:6px 12px;font-size:12px;">Save</button>
+      </div>
+    </div>
+  `;
+}
+function DOW_LABELS(days){
+  const names = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  return days.map(d=>names[d]).join('');
 }
 
 // ---------- SCRIPTURE ----------
