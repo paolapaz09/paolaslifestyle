@@ -162,6 +162,23 @@
   .journal-entry:last-child{border-bottom:none;}
   .journal-date{font-size:12px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:0.3px;}
   .journal-text{font-size:14px;margin-top:4px;line-height:1.5;}
+  .cycle-day-badge{width:110px;height:110px;border-radius:50%;background:linear-gradient(145deg,var(--sage-500),var(--sage-700));color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto 14px;}
+  .cycle-day-badge .num{font-family:'Fraunces',serif;font-size:36px;line-height:1;}
+  .cycle-day-badge .lbl{font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.9;}
+  .cycle-stats{display:flex;justify-content:center;gap:26px;text-align:center;margin-top:6px;flex-wrap:wrap;}
+  .cycle-stats .cs{font-size:12px;color:var(--ink-soft);}
+  .cycle-stats .cs b{display:block;font-family:'Fraunces',serif;font-size:18px;color:var(--sage-700);}
+  .symptom-grid{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px;}
+  .symptom-toggle{border:1px solid var(--line);background:#fff;border-radius:18px;padding:7px 14px;font-size:12.5px;}
+  .symptom-toggle.on{background:var(--rust);color:#fff;border-color:var(--rust);}
+  .flow-choice{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+  .flow-choice button{flex:1;min-width:70px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 6px;font-size:12px;}
+  .flow-choice button.on{background:var(--sage-600);color:#fff;border-color:var(--sage-600);}
+  .cycle-history-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;}
+  .cycle-history-row:last-child{border-bottom:none;}
+  .cycle-tags span{background:var(--sage-100);color:var(--sage-700);border-radius:10px;padding:2px 8px;font-size:11px;margin-left:4px;}
+  .correlation-bar-row{margin-bottom:14px;}
+  .correlation-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;}
   .add-toggle{background:var(--sage-100);color:var(--sage-700);border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;}
   .add-toggle:hover{background:var(--sage-200);}
   .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
@@ -300,6 +317,7 @@ const TABS = [
   {id:'today', label:'Today'},
   {id:'food', label:'Food & Macros'},
   {id:'inflammatory', label:'Inflammatory'},
+  {id:'cycle', label:'Cycle'},
   {id:'progress', label:'Progress'},
   {id:'habits', label:'Habits'},
   {id:'journal', label:'Journal'},
@@ -319,6 +337,7 @@ async function renderPanel(){
     if(activeTab==='today') await renderToday(panel);
     else if(activeTab==='food') await renderFood(panel);
     else if(activeTab==='inflammatory') await renderInflammatory(panel);
+    else if(activeTab==='cycle') await renderCycle(panel);
     else if(activeTab==='progress') await renderProgress(panel);
     else if(activeTab==='habits') await renderHabits(panel);
     else if(activeTab==='journal') await renderJournal(panel);
@@ -821,7 +840,184 @@ function journalEntry(e){
   return `<div class="journal-entry"><div class="journal-date">${stamp}</div><div class="journal-text">${esc(e.notes)}</div></div>`;
 }
 
-// ---------- HABITS ----------
+// ---------- CYCLE ----------
+let cycleSelectedDate = todayStr();
+const FLOW_OPTIONS = ['none','spotting','light','medium','heavy'];
+const SYMPTOM_FIELDS = [
+  {key:'breast_pain', label:'Breast pain'},
+  {key:'cramps', label:'Cramps'},
+  {key:'bloating', label:'Bloating'},
+  {key:'headache', label:'Headache'},
+  {key:'acne', label:'Acne'},
+  {key:'sex_activity', label:'Sexual activity'},
+];
+
+function computeCycleStats(logs){
+  // logs: array of {date, flow} ascending by date, flow != 'none' marks bleeding days
+  const bleedDates = logs.filter(l => l.flow && l.flow !== 'none').map(l => l.date).sort();
+  if(bleedDates.length === 0) return null;
+  // find period start dates: a bleed date not immediately preceded by another bleed date
+  const starts = [];
+  bleedDates.forEach(d => {
+    const prev = addDays(d, -1);
+    if(!bleedDates.includes(prev)) starts.push(d);
+  });
+  const lastStart = starts[starts.length-1];
+  let avgCycleLen = null;
+  if(starts.length >= 2){
+    const gaps = [];
+    for(let i=1;i<starts.length;i++){
+      gaps.push((new Date(starts[i]) - new Date(starts[i-1])) / 86400000);
+    }
+    avgCycleLen = Math.round(gaps.reduce((a,b)=>a+b,0)/gaps.length);
+  }
+  const today = todayStr();
+  const currentDay = Math.floor((new Date(today) - new Date(lastStart))/86400000) + 1;
+  const predictedNext = avgCycleLen ? addDays(lastStart, avgCycleLen) : null;
+  return {lastStart, avgCycleLen, currentDay, predictedNext, totalCyclesTracked: starts.length};
+}
+
+async function renderCycle(panel){
+  const uid = session.user.id;
+  const allLogs = await supa(`/rest/v1/cycle_logs?user_id=eq.${uid}&order=date.asc&select=*`);
+  const stats = computeCycleStats(allLogs);
+  const todayLog = allLogs.find(l => l.date === cycleSelectedDate) || {};
+  const label = formatDateLabel(cycleSelectedDate);
+  const isFuture = cycleSelectedDate >= todayStr();
+
+  panel.innerHTML = `
+    <div class="card" style="text-align:center;">
+      <h2 class="section-title" style="text-align:left;">Cycle overview</h2>
+      ${stats ? `
+        <div class="cycle-day-badge"><div class="num">${stats.currentDay > 0 ? stats.currentDay : '–'}</div><div class="lbl">cycle day</div></div>
+        <div class="cycle-stats">
+          <div class="cs"><b>${stats.avgCycleLen || '—'}</b>avg length (days)</div>
+          <div class="cs"><b>${stats.predictedNext || 'more data needed'}</b>next period (est.)</div>
+          <div class="cs"><b>${stats.totalCyclesTracked}</b>cycles tracked</div>
+        </div>
+        <p class="muted" style="margin-top:14px;">Estimates improve the more periods you log — this isn't a medical prediction, just a pattern from your own data.</p>
+      ` : `<p class="empty-state">Log a period day below and I'll start tracking your cycle.</p>`}
+    </div>
+
+    <div class="card">
+      <div class="date-nav">
+        <button class="date-nav-btn" id="cyc-prev">‹</button>
+        <div class="date-nav-label">
+          <div class="big">${label.big}</div>
+          <div class="small">${label.small}</div>
+          ${cycleSelectedDate !== todayStr() ? `<button class="jump-today" id="cyc-jump">Jump to today</button>` : ''}
+        </div>
+        <button class="date-nav-btn" id="cyc-next" ${isFuture?'disabled':''}>›</button>
+      </div>
+      <h2 class="section-title">Flow</h2>
+      <div class="flow-choice" id="flow-choice">
+        ${FLOW_OPTIONS.map(f => `<button data-flow="${f}" class="${((todayLog.flow||'none')===f)?'on':''}">${f}</button>`).join('')}
+      </div>
+      <h2 class="section-title">Symptoms & activity</h2>
+      <div class="symptom-grid" id="symptom-grid">
+        ${SYMPTOM_FIELDS.map(s => `<button class="symptom-toggle ${todayLog[s.key]?'on':''}" data-key="${s.key}">${s.label}</button>`).join('')}
+      </div>
+      <div class="field"><label>Mood</label><input type="text" id="cyc-mood" value="${esc(todayLog.mood||'')}" placeholder="e.g. irritable, calm, low energy"></div>
+      <div class="field"><label>Notes</label><textarea id="cyc-notes" rows="2">${esc(todayLog.notes||'')}</textarea></div>
+      <button class="btn btn-primary" id="save-cycle" style="width:auto;padding:11px 26px;">Save</button>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Recent history</h2>
+      ${allLogs.slice().reverse().slice(0,14).length ? allLogs.slice().reverse().slice(0,14).map(cycleHistoryRow).join('') : `<p class="empty-state">No entries yet.</p>`}
+    </div>
+
+    <div class="card" id="correlation-card">
+      <h2 class="section-title">Food & hormone patterns</h2>
+      <div id="correlation-body"><p class="muted">Crunching your data…</p></div>
+    </div>
+  `;
+
+  let selectedFlow = todayLog.flow || 'none';
+  const symptomState = {};
+  SYMPTOM_FIELDS.forEach(s => symptomState[s.key] = !!todayLog[s.key]);
+
+  $('#cyc-prev').onclick = () => { cycleSelectedDate = addDays(cycleSelectedDate,-1); renderCycle(panel); };
+  $('#cyc-next').onclick = () => { if(!isFuture){ cycleSelectedDate = addDays(cycleSelectedDate,1); renderCycle(panel); } };
+  const jumpBtn = $('#cyc-jump');
+  if(jumpBtn) jumpBtn.onclick = () => { cycleSelectedDate = todayStr(); renderCycle(panel); };
+
+  $('#flow-choice').querySelectorAll('button').forEach(b => b.onclick = () => {
+    selectedFlow = b.dataset.flow;
+    $('#flow-choice').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+  });
+  $('#symptom-grid').querySelectorAll('.symptom-toggle').forEach(b => b.onclick = () => {
+    symptomState[b.dataset.key] = !symptomState[b.dataset.key];
+    b.classList.toggle('on', symptomState[b.dataset.key]);
+  });
+  $('#save-cycle').onclick = async () => {
+    const body = {
+      user_id: uid, date: cycleSelectedDate,
+      flow: selectedFlow,
+      mood: $('#cyc-mood').value,
+      notes: $('#cyc-notes').value,
+      ...symptomState
+    };
+    await supa(`/rest/v1/cycle_logs?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify(body)});
+    renderCycle(panel);
+  };
+
+  renderCorrelation(allLogs);
+}
+
+function cycleHistoryRow(l){
+  const tags = [];
+  if(l.flow && l.flow !== 'none') tags.push(l.flow);
+  SYMPTOM_FIELDS.forEach(s => { if(l[s.key]) tags.push(s.label); });
+  return `<div class="cycle-history-row"><span>${l.date}</span><span class="cycle-tags">${tags.map(t=>`<span>${esc(t)}</span>`).join('')}</span></div>`;
+}
+
+async function renderCorrelation(cycleLogs){
+  const body = $('#correlation-body');
+  if(!body) return;
+  const uid = session.user.id;
+  const symptomDays = cycleLogs.filter(l => l.breast_pain || l.cramps || l.bloating || l.headache).map(l => l.date);
+  if(symptomDays.length < 3){
+    body.innerHTML = `<p class="muted">Log symptoms on at least a few days and I'll start comparing what you were eating on those days versus your clearer days.</p>`;
+    return;
+  }
+  const earliestDate = cycleLogs[0]?.date || todayStr();
+  if(!flagsCache) flagsCache = await supa('/rest/v1/inflammatory_flags?select=*');
+  const foodLogs = await supa(`/rest/v1/food_logs?user_id=eq.${uid}&date=gte.${earliestDate}&select=*`);
+
+  const flagCountByDate = {};
+  foodLogs.forEach(l => {
+    const text = `${l.food_name||''} ${l.ingredients_raw||''}`.toLowerCase();
+    let count = 0;
+    flagsCache.forEach(f => { if(text.includes(f.keyword.toLowerCase())) count++; });
+    flagCountByDate[l.date] = (flagCountByDate[l.date]||0) + count;
+  });
+
+  const allDatesLogged = Object.keys(flagCountByDate);
+  const symptomSet = new Set(symptomDays);
+  const onDays = allDatesLogged.filter(d => symptomSet.has(d));
+  const offDays = allDatesLogged.filter(d => !symptomSet.has(d));
+  const avg = arr => arr.length ? arr.reduce((a,d)=>a+flagCountByDate[d],0)/arr.length : 0;
+  const avgOn = avg(onDays), avgOff = avg(offDays);
+
+  if(onDays.length === 0 || offDays.length === 0){
+    body.innerHTML = `<p class="muted">Once you have food logged on both symptom days and clearer days, I'll compare inflammatory flags between them.</p>`;
+    return;
+  }
+  const maxVal = Math.max(avgOn, avgOff, 1);
+  body.innerHTML = `
+    <p class="muted">Average inflammatory food flags per day, symptom days vs. clearer days (based on ${onDays.length} symptom day${onDays.length===1?'':'s'} and ${offDays.length} clearer day${offDays.length===1?'':'s'} with food logged):</p>
+    <div class="correlation-bar-row">
+      <div class="correlation-label"><span>Symptom days</span><b>${avgOn.toFixed(1)}</b></div>
+      <div class="flag-bar-track"><div class="flag-bar-fill" style="width:${(avgOn/maxVal)*100}%;background:var(--rust);"></div></div>
+    </div>
+    <div class="correlation-bar-row">
+      <div class="correlation-label"><span>Clearer days</span><b>${avgOff.toFixed(1)}</b></div>
+      <div class="flag-bar-track"><div class="flag-bar-fill" style="width:${(avgOff/maxVal)*100}%;background:var(--sage-500);"></div></div>
+    </div>
+    <p class="muted" style="margin-top:10px;">${avgOn > avgOff*1.2 ? "There's a noticeable pattern — you tend to eat more flagged foods on symptom days. Worth mentioning to your doctor alongside your anti-inflammatory diet." : "No strong pattern yet — keep logging and this will get more reliable over time."} This is observational, not a diagnosis.</p>
+  `;
+}
 async function renderHabits(panel){
   const uid = session.user.id;
   const weekAgo = new Date(Date.now() - 6*86400000).toISOString().slice(0,10);
