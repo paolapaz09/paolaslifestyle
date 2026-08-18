@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paola's Lifestyle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{
+    --sage-50:#F6F7F1;
+    --sage-100:#E9EDE1;
+    --sage-200:#D6DECB;
+    --sage-300:#B7C4A7;
+    --sage-500:#7C9473;
+    --sage-600:#647A5C;
+    --sage-700:#465241;
+    --cream:#FBFAF5;
+    --ink:#2B2F27;
+    --ink-soft:#5C6355;
+    --gold:#B99B5B;
+    --rust:#B5674B;
+    --line:#DDE3D3;
+    --radius:14px;
+    --shadow:0 2px 10px rgba(70,82,65,0.08);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Inter',sans-serif;
+    background:var(--sage-50);
+    color:var(--ink);
+    min-height:100vh;
+  }
+  h1,h2,h3,.display{font-family:'Fraunces',serif;}
+  button{font-family:'Inter',sans-serif;cursor:pointer;}
+  #root{max-width:900px;margin:0 auto;padding:20px 16px 60px;}
+
+  /* --- header --- */
+  .app-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--line);}
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand h1{font-size:22px;font-weight:600;color:var(--sage-700);margin:0;letter-spacing:0.2px;}
+  .leaf-icon svg{display:block;}
+  .signout{background:none;border:1px solid var(--line);color:var(--ink-soft);font-size:13px;padding:7px 14px;border-radius:20px;}
+  .signout:hover{background:var(--sage-100);}
+
+  /* --- auth --- */
+  .auth-wrap{max-width:380px;margin:60px auto;text-align:center;}
+  .auth-wrap h1{font-size:30px;color:var(--sage-700);margin-bottom:4px;}
+  .auth-sub{color:var(--ink-soft);font-size:14px;margin-bottom:28px;}
+  .card{background:var(--cream);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:var(--shadow);}
+  .field{margin-bottom:14px;text-align:left;}
+  .field label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;}
+  input,select,textarea{
+    width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;
+    font-size:14px;font-family:'Inter',sans-serif;background:#fff;color:var(--ink);
+  }
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--sage-300);border-color:var(--sage-500);}
+  .btn{border:none;border-radius:24px;padding:11px 20px;font-size:14px;font-weight:600;}
+  .btn-primary{background:var(--sage-600);color:#fff;width:100%;}
+  .btn-primary:hover{background:var(--sage-700);}
+  .btn-ghost{background:none;border:1px solid var(--line);color:var(--sage-700);}
+  .btn-ghost:hover{background:var(--sage-100);}
+  .switch-link{margin-top:14px;font-size:13px;color:var(--ink-soft);}
+  .switch-link a{color:var(--sage-600);cursor:pointer;text-decoration:underline;}
+  .auth-error{color:var(--rust);font-size:13px;margin-top:10px;}
+
+  /* --- tabs --- */
+  .tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:22px;padding-bottom:2px;}
+  .tab-btn{background:none;border:none;padding:8px 14px;font-size:13.5px;font-weight:600;color:var(--ink-soft);border-radius:20px;white-space:nowrap;}
+  .tab-btn.active{background:var(--sage-600);color:#fff;}
+  .tab-btn:not(.active):hover{background:var(--sage-100);color:var(--sage-700);}
+
+  section.panel{display:flex;flex-direction:column;gap:18px;}
+  .row{display:flex;gap:14px;flex-wrap:wrap;}
+  .row > .card{flex:1;min-width:220px;}
+  .section-title{font-size:17px;color:var(--sage-700);margin:0 0 12px;font-weight:600;}
+  .muted{color:var(--ink-soft);font-size:13px;}
+
+  /* leaf divider */
+  .sprig{display:flex;align-items:center;gap:8px;margin:4px 0 16px;color:var(--sage-300);}
+  .sprig svg{flex-shrink:0;}
+  .sprig .line{flex:1;height:1px;background:var(--line);}
+
+  /* habit checklist */
+  .habit-item{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);}
+  .habit-item:last-child{border-bottom:none;}
+  .habit-check{display:flex;align-items:center;gap:10px;}
+  .checkbox{width:22px;height:22px;border-radius:6px;border:2px solid var(--sage-300);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .checkbox.done{background:var(--sage-500);border-color:var(--sage-500);}
+  .checkbox.done svg{stroke:#fff;}
+  .habit-name{font-size:14px;}
+  .habit-freq{font-size:11px;color:var(--ink-soft);}
+  .small-btn{background:none;border:none;color:var(--rust);font-size:12px;}
+
+  /* food log */
+  .food-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);gap:10px;}
+  .food-row:last-child{border-bottom:none;}
+  .food-name{font-size:14px;font-weight:600;}
+  .food-macros{font-size:12px;color:var(--ink-soft);}
+  .macro-pill{display:inline-block;background:var(--sage-100);color:var(--sage-700);border-radius:12px;padding:2px 9px;font-size:11px;margin-right:5px;}
+  .totals-bar{display:flex;gap:16px;background:var(--sage-100);border-radius:10px;padding:12px 16px;margin-top:6px;flex-wrap:wrap;}
+  .totals-bar .t{font-size:12px;color:var(--sage-700);}
+  .totals-bar .t b{font-size:16px;display:block;font-family:'Fraunces',serif;}
+
+  .search-results{max-height:220px;overflow-y:auto;margin-top:8px;}
+  .search-result{padding:8px 10px;border-radius:8px;font-size:13px;cursor:pointer;border:1px solid var(--line);margin-bottom:6px;}
+  .search-result:hover{background:var(--sage-100);}
+
+  #reader{width:100%;max-width:340px;margin:10px auto;border-radius:10px;overflow:hidden;}
+
+  /* progress */
+  .stem-wrap{margin:18px 0 6px;}
+  .stem-track{position:relative;height:10px;background:var(--sage-100);border-radius:6px;}
+  .stem-fill{position:absolute;left:0;top:0;height:10px;background:linear-gradient(90deg,var(--sage-300),var(--sage-600));border-radius:6px;}
+  .stem-leaf{position:absolute;top:-11px;transform:translateX(-50%);}
+  .stem-labels{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-soft);margin-top:6px;}
+  .weight-now{font-size:34px;font-family:'Fraunces',serif;color:var(--sage-700);}
+  .weight-goal{font-size:13px;color:var(--ink-soft);}
+
+  svg.chart{width:100%;height:180px;}
+
+  /* inflammatory */
+  .flag-cat{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);}
+  .flag-cat:last-child{border-bottom:none;}
+  .flag-bar-track{background:var(--sage-100);border-radius:6px;height:8px;flex:1;margin:0 12px;overflow:hidden;}
+  .flag-bar-fill{height:8px;background:var(--rust);border-radius:6px;}
+  .flag-count{font-size:13px;font-weight:600;width:20px;text-align:right;}
+
+  /* scripture */
+  .scripture-card{background:linear-gradient(180deg,var(--cream),var(--sage-50));text-align:center;padding:36px 26px;position:relative;}
+  .scripture-text{font-family:'Fraunces',serif;font-size:19px;line-height:1.55;color:var(--sage-700);font-weight:400;font-style:italic;}
+  .scripture-ref{margin-top:14px;font-size:13px;color:var(--gold);font-weight:600;letter-spacing:0.4px;text-transform:uppercase;}
+
+  .empty-state{text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;}
+  .add-toggle{background:var(--sage-100);color:var(--sage-700);border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;}
+  .add-toggle:hover{background:var(--sage-200);}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .tag-choice{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+  .tag-choice button{padding:6px 12px;border-radius:16px;border:1px solid var(--line);background:#fff;font-size:12px;}
+  .tag-choice button.active{background:var(--sage-600);color:#fff;border-color:var(--sage-600);}
+  @media(max-width:520px){
+    .row > .card{min-width:100%;}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+const SUPABASE_URL = 'https://gcpeomazdqtuakjnhwqo.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_y9qqZBC3b8vNQb2rFvUduw_UD1XdJ1F';
+const USDA_KEY = '5QilVVA6mgtzzUPMCpmop9eA1z6Z1miU2IXFk1xX';
+
+let session = null;
+let profile = null;
+let activeTab = 'today';
+let authMode = 'signin';
+let flagsCache = null;
+
+const todayStr = () => new Date().toISOString().slice(0,10);
+const $ = sel => document.querySelector(sel);
+const esc = s => (s||'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const leafSvg = (color='var(--sage-500)', size=18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M4 20C4 10 10 4 20 4C20 14 14 20 4 20Z" stroke="${color}" stroke-width="1.6"/><path d="M4 20C8 16 12 12 20 4" stroke="${color}" stroke-width="1.2"/></svg>`;
+
+// ---------- Supabase REST helpers ----------
+async function supa(path, opts={}){
+  const headers = {'apikey': SUPABASE_KEY, 'Content-Type':'application/json', ...(opts.headers||{})};
+  if(session?.access_token) headers['Authorization'] = 'Bearer ' + session.access_token;
+  const res = await fetch(SUPABASE_URL + path, {...opts, headers});
+  if(!res.ok){ const t = await res.text(); throw new Error(t); }
+  if(res.status === 204) return null;
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+async function signUp(email, password){
+  const res = await fetch(SUPABASE_URL+'/auth/v1/signup', {method:'POST', headers:{'apikey':SUPABASE_KEY,'Content-Type':'application/json'}, body: JSON.stringify({email,password})});
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.msg || data.error_description || 'Sign up failed');
+  return data;
+}
+async function signIn(email, password){
+  const res = await fetch(SUPABASE_URL+'/auth/v1/token?grant_type=password', {method:'POST', headers:{'apikey':SUPABASE_KEY,'Content-Type':'application/json'}, body: JSON.stringify({email,password})});
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error_description || data.msg || 'Login failed');
+  return data;
+}
+async function refreshSession(refresh_token){
+  try{
+    const res = await fetch(SUPABASE_URL+'/auth/v1/token?grant_type=refresh_token', {method:'POST', headers:{'apikey':SUPABASE_KEY,'Content-Type':'application/json'}, body: JSON.stringify({refresh_token})});
+    if(!res.ok) return null;
+    return res.json();
+  }catch(e){ return null; }
+}
+async function saveSession(s){
+  session = s;
+  try{ await window.storage.set('session', JSON.stringify({refresh_token: s.refresh_token}), false); }catch(e){}
+}
+async function loadSession(){
+  try{
+    const r = await window.storage.get('session');
+    if(r && r.value){
+      const {refresh_token} = JSON.parse(r.value);
+      const fresh = await refreshSession(refresh_token);
+      if(fresh && fresh.access_token){ session = fresh; return true; }
+    }
+  }catch(e){}
+  return false;
+}
+async function signOut(){
+  try{ await window.storage.delete('session', false); }catch(e){}
+  session = null; profile = null;
+  render();
+}
+
+async function ensureProfile(){
+  const uid = session.user.id;
+  let rows = await supa(`/rest/v1/profiles?id=eq.${uid}&select=*`);
+  if(!rows || rows.length === 0){
+    rows = await supa('/rest/v1/profiles', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify({id:uid, starting_weight:138, goal_weight:125, workout_goal_per_week:5})});
+  }
+  profile = rows[0];
+}
+
+// ---------- App shell ----------
+async function init(){
+  renderLoading();
+  const ok = await loadSession();
+  if(ok){ await ensureProfile(); }
+  render();
+}
+
+function renderLoading(){
+  $('#root').innerHTML = `<div style="text-align:center;padding:100px 20px;color:var(--ink-soft);">${leafSvg('var(--sage-400)',30)}<p>Loading…</p></div>`;
+}
+
+function render(){
+  if(!session){ renderAuth(); return; }
+  const root = $('#root');
+  root.innerHTML = `
+    <div class="app-header">
+      <div class="brand">${leafSvg('var(--sage-600)',26)}<h1>Paola's Lifestyle</h1></div>
+      <button class="signout" id="signout-btn">Sign out</button>
+    </div>
+    <div class="tabs" id="tabs"></div>
+    <section class="panel" id="panel"></section>
+  `;
+  $('#signout-btn').onclick = signOut;
+  renderTabs();
+  renderPanel();
+}
+
+const TABS = [
+  {id:'today', label:'Today'},
+  {id:'food', label:'Food & Macros'},
+  {id:'inflammatory', label:'Inflammatory'},
+  {id:'progress', label:'Progress'},
+  {id:'habits', label:'Habits'},
+  {id:'scripture', label:'Scripture'},
+];
+
+function renderTabs(){
+  const wrap = $('#tabs');
+  wrap.innerHTML = TABS.map(t => `<button class="tab-btn ${activeTab===t.id?'active':''}" data-tab="${t.id}">${t.label}</button>`).join('');
+  wrap.querySelectorAll('.tab-btn').forEach(btn => btn.onclick = () => { activeTab = btn.dataset.tab; renderTabs(); renderPanel(); });
+}
+
+async function renderPanel(){
+  const panel = $('#panel');
+  panel.innerHTML = `<div class="empty-state">${leafSvg('var(--sage-300)',22)}<p>Loading…</p></div>`;
+  try{
+    if(activeTab==='today') await renderToday(panel);
+    else if(activeTab==='food') await renderFood(panel);
+    else if(activeTab==='inflammatory') await renderInflammatory(panel);
+    else if(activeTab==='progress') await renderProgress(panel);
+    else if(activeTab==='habits') await renderHabits(panel);
+    else if(activeTab==='scripture') await renderScripture(panel);
+  }catch(e){
+    panel.innerHTML = `<div class="card"><p class="auth-error">Something went wrong: ${esc(e.message)}</p></div>`;
+  }
+}
+
+// ---------- AUTH SCREEN ----------
+function renderAuth(){
+  const root = $('#root');
+  root.innerHTML = `
+  <div class="auth-wrap">
+    <div class="brand" style="justify-content:center;margin-bottom:14px;">${leafSvg('var(--sage-600)',30)}</div>
+    <h1>Paola's Lifestyle</h1>
+    <p class="auth-sub">A quiet place to track your body, your habits, and your goals.</p>
+    <div class="card">
+      <div class="field"><label>Email</label><input type="email" id="auth-email" autocomplete="email"></div>
+      <div class="field"><label>Password</label><input type="password" id="auth-pass" autocomplete="current-password"></div>
+      <button class="btn btn-primary" id="auth-submit">${authMode==='signin'?'Sign in':'Create account'}</button>
+      <p class="auth-error" id="auth-err" style="display:none;"></p>
+    </div>
+    <p class="switch-link" id="switch-link">
+      ${authMode==='signin' ? `Don't have an account? <a id="switch">Create one</a>` : `Already have an account? <a id="switch">Sign in</a>`}
+    </p>
+  </div>`;
+  $('#switch').onclick = () => { authMode = authMode==='signin' ? 'signup' : 'signin'; renderAuth(); };
+  $('#auth-submit').onclick = async () => {
+    const email = $('#auth-email').value.trim();
+    const pass = $('#auth-pass').value;
+    const errEl = $('#auth-err');
+    errEl.style.display='none';
+    try{
+      if(authMode==='signup'){
+        const data = await signUp(email, pass);
+        if(data.access_token){ await saveSession(data); await ensureProfile(); render(); }
+        else { errEl.textContent = 'Account created — check your email to confirm, then sign in.'; errEl.style.display='block'; authMode='signin'; }
+      } else {
+        const data = await signIn(email, pass);
+        await saveSession(data);
+        await ensureProfile();
+        render();
+      }
+    }catch(e){
+      errEl.textContent = e.message;
+      errEl.style.display='block';
+    }
+  };
+}
+
+// ---------- TODAY ----------
+async function renderToday(panel){
+  const uid = session.user.id;
+  const [checkins, habits, logs] = await Promise.all([
+    supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&date=eq.${todayStr()}&select=*`),
+    supa(`/rest/v1/habits?user_id=eq.${uid}&active=eq.true&order=created_at.asc&select=*`),
+    supa(`/rest/v1/habit_logs?user_id=eq.${uid}&date=eq.${todayStr()}&select=*`),
+  ]);
+  const checkin = checkins[0] || {};
+  const doneMap = {};
+  logs.forEach(l => doneMap[l.habit_id] = l.completed);
+
+  panel.innerHTML = `
+    <div class="row">
+      <div class="card">
+        <h2 class="section-title">Daily check-in</h2>
+        <div class="field"><label>Weight (lbs)</label><input type="number" step="0.1" id="ci-weight" value="${checkin.weight ?? ''}" placeholder="${profile.starting_weight}"></div>
+        <div class="field"><label>Notes</label><textarea id="ci-notes" rows="2" placeholder="How are you feeling today?">${esc(checkin.notes||'')}</textarea></div>
+        <button class="btn btn-primary" id="save-checkin">Save check-in</button>
+      </div>
+      <div class="card">
+        <h2 class="section-title">Habits today</h2>
+        <div id="habit-list">${habits.length ? habits.map(h => habitRow(h, doneMap[h.id])).join('') : `<p class="empty-state">No habits yet — add some in the Habits tab.</p>`}</div>
+      </div>
+    </div>
+  `;
+  $('#save-checkin').onclick = async () => {
+    const weight = $('#ci-weight').value ? parseFloat($('#ci-weight').value) : null;
+    const notes = $('#ci-notes').value;
+    await supa(`/rest/v1/daily_checkins?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, date:todayStr(), weight, notes})});
+    renderToday(panel);
+  };
+  panel.querySelectorAll('.checkbox').forEach(cb => {
+    cb.onclick = async () => {
+      const habitId = cb.dataset.habit;
+      const nowDone = cb.classList.contains('done');
+      await supa(`/rest/v1/habit_logs?on_conflict=habit_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, habit_id:habitId, date:todayStr(), completed: !nowDone})});
+      renderToday(panel);
+    };
+  });
+}
+function habitRow(h, done){
+  return `<div class="habit-item">
+    <div class="habit-check">
+      <div class="checkbox ${done?'done':''}" data-habit="${h.id}">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 12l6 6L20 6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>':''}</div>
+      <div><div class="habit-name">${esc(h.name)}</div><div class="habit-freq">${h.target_frequency}x / week</div></div>
+    </div>
+  </div>`;
+}
+
+// ---------- FOOD ----------
+let pendingFood = null;
+async function renderFood(panel){
+  const uid = session.user.id;
+  const logs = await supa(`/rest/v1/food_logs?user_id=eq.${uid}&date=eq.${todayStr()}&order=created_at.asc&select=*`);
+  const totals = logs.reduce((a,l)=>({cal:a.cal+(+l.calories||0),p:a.p+(+l.protein||0),c:a.c+(+l.carbs||0),f:a.f+(+l.fat||0)}),{cal:0,p:0,c:0,f:0});
+
+  panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">Add food</h2>
+      <div class="btn-row" style="margin-bottom:14px;">
+        <button class="add-toggle" id="mode-search">Search database</button>
+        <button class="add-toggle" id="mode-scan">Scan barcode</button>
+        <button class="add-toggle" id="mode-manual">Manual entry</button>
+      </div>
+      <div id="add-food-area"></div>
+    </div>
+    <div class="card">
+      <h2 class="section-title">Today's log</h2>
+      <div class="totals-bar">
+        <div class="t"><b>${Math.round(totals.cal)}</b>cal</div>
+        <div class="t"><b>${Math.round(totals.p)}g</b>protein</div>
+        <div class="t"><b>${Math.round(totals.c)}g</b>carbs</div>
+        <div class="t"><b>${Math.round(totals.f)}g</b>fat</div>
+      </div>
+      <div style="margin-top:14px;">
+        ${logs.length? logs.map(foodRow).join('') : `<p class="empty-state">Nothing logged yet today.</p>`}
+      </div>
+    </div>
+  `;
+  panel.querySelectorAll('.del-food').forEach(b => b.onclick = async () => {
+    await supa(`/rest/v1/food_logs?id=eq.${b.dataset.id}`, {method:'DELETE'});
+    renderFood(panel);
+  });
+  $('#mode-search').onclick = () => renderManualArea('search');
+  $('#mode-scan').onclick = () => renderManualArea('scan');
+  $('#mode-manual').onclick = () => renderManualArea('manual');
+  renderManualArea('manual');
+
+  function renderManualArea(mode){
+    const area = $('#add-food-area');
+    if(mode==='manual'){
+      area.innerHTML = manualFormHtml();
+      wireManualForm();
+    } else if(mode==='search'){
+      area.innerHTML = `
+        <div class="field"><label>Search USDA food database</label><input type="text" id="usda-q" placeholder="e.g. grilled chicken breast"></div>
+        <button class="btn btn-ghost" id="usda-search-btn">Search</button>
+        <div class="search-results" id="usda-results"></div>
+      `;
+      $('#usda-search-btn').onclick = async () => {
+        const q = $('#usda-q').value.trim();
+        if(!q) return;
+        $('#usda-results').innerHTML = '<p class="muted">Searching…</p>';
+        try{
+          const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&query=${encodeURIComponent(q)}&pageSize=8`);
+          const data = await res.json();
+          const foods = data.foods || [];
+          $('#usda-results').innerHTML = foods.length ? foods.map((f,i)=>`<div class="search-result" data-idx="${i}">${esc(f.description)}</div>`).join('') : '<p class="muted">No results.</p>';
+          $('#usda-results').querySelectorAll('.search-result').forEach(el => el.onclick = () => {
+            const f = foods[el.dataset.idx];
+            const getN = name => (f.foodNutrients.find(n => (n.nutrientName||'').includes(name))||{}).value || 0;
+            pendingFood = {
+              food_name: f.description,
+              calories: getN('Energy'),
+              protein: getN('Protein'),
+              carbs: getN('Carbohydrate'),
+              fat: getN('Total lipid'),
+              source: 'usda'
+            };
+            area.innerHTML = manualFormHtml(pendingFood);
+            wireManualForm();
+          });
+        }catch(e){ $('#usda-results').innerHTML = '<p class="auth-error">Search failed.</p>'; }
+      };
+    } else if(mode==='scan'){
+      area.innerHTML = `<div id="reader"></div><p class="muted" style="text-align:center;">Point your camera at a barcode.</p>`;
+      const qr = new Html5Qrcode('reader');
+      qr.start({facingMode:'environment'}, {fps:10, qrbox:220}, async (decoded) => {
+        qr.stop();
+        area.innerHTML = `<p class="muted">Looking up product…</p>`;
+        try{
+          const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${decoded}.json`);
+          const data = await res.json();
+          if(data.status !== 1){ area.innerHTML = `<p class="auth-error">Product not found. Try manual entry.</p>`; return; }
+          const p = data.product;
+          const n = p.nutriments || {};
+          pendingFood = {
+            food_name: p.product_name || 'Scanned item',
+            calories: n['energy-kcal_100g'] || n['energy-kcal_serving'] || 0,
+            protein: n['proteins_100g'] || n['proteins_serving'] || 0,
+            carbs: n['carbohydrates_100g'] || n['carbohydrates_serving'] || 0,
+            fat: n['fat_100g'] || n['fat_serving'] || 0,
+            source: 'barcode',
+            barcode: decoded,
+            ingredients_raw: p.ingredients_text || ''
+          };
+          area.innerHTML = `<p class="muted">Values shown are per 100g — adjust if needed.</p>` + manualFormHtml(pendingFood);
+          wireManualForm();
+        }catch(e){ area.innerHTML = `<p class="auth-error">Lookup failed.</p>`; }
+      }, ()=>{}).catch(()=>{ area.innerHTML = `<p class="auth-error">Camera unavailable. Try manual entry instead.</p>`; });
+    }
+  }
+
+  function manualFormHtml(prefill={}){
+    return `
+      <div class="row">
+        <div class="field" style="flex:2;min-width:180px;"><label>Food name</label><input type="text" id="f-name" value="${esc(prefill.food_name||'')}"></div>
+        <div class="field" style="min-width:120px;"><label>Meal</label>
+          <select id="f-meal"><option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option></select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Calories</label><input type="number" id="f-cal" value="${prefill.calories||''}"></div>
+        <div class="field"><label>Protein (g)</label><input type="number" id="f-p" value="${prefill.protein||''}"></div>
+        <div class="field"><label>Carbs (g)</label><input type="number" id="f-c" value="${prefill.carbs||''}"></div>
+        <div class="field"><label>Fat (g)</label><input type="number" id="f-f" value="${prefill.fat||''}"></div>
+      </div>
+      <button class="btn btn-primary" id="save-food" style="width:auto;padding:11px 26px;">Add to today's log</button>
+    `;
+  }
+  function wireManualForm(){
+    $('#save-food').onclick = async () => {
+      const body = {
+        user_id: uid, date: todayStr(),
+        meal: $('#f-meal').value,
+        food_name: $('#f-name').value.trim() || 'Untitled food',
+        calories: parseFloat($('#f-cal').value)||0,
+        protein: parseFloat($('#f-p').value)||0,
+        carbs: parseFloat($('#f-c').value)||0,
+        fat: parseFloat($('#f-f').value)||0,
+        source: (pendingFood && pendingFood.source) || 'manual',
+        barcode: pendingFood?.barcode || null,
+        ingredients_raw: pendingFood?.ingredients_raw || null
+      };
+      await supa('/rest/v1/food_logs', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(body)});
+      pendingFood = null;
+      renderFood(panel);
+    };
+  }
+}
+function foodRow(l){
+  return `<div class="food-row">
+    <div>
+      <div class="food-name">${esc(l.food_name)} ${l.meal?`<span class="muted">· ${esc(l.meal)}</span>`:''}</div>
+      <div class="food-macros"><span class="macro-pill">${Math.round(l.calories||0)} cal</span><span class="macro-pill">${Math.round(l.protein||0)}g P</span><span class="macro-pill">${Math.round(l.carbs||0)}g C</span><span class="macro-pill">${Math.round(l.fat||0)}g F</span></div>
+    </div>
+    <button class="small-btn del-food" data-id="${l.id}">Remove</button>
+  </div>`;
+}
+
+// ---------- INFLAMMATORY ----------
+async function renderInflammatory(panel){
+  const uid = session.user.id;
+  if(!flagsCache) flagsCache = await supa('/rest/v1/inflammatory_flags?select=*');
+  const weekAgo = new Date(Date.now() - 6*86400000).toISOString().slice(0,10);
+  const logs = await supa(`/rest/v1/food_logs?user_id=eq.${uid}&date=gte.${weekAgo}&select=*`);
+
+  const catCounts = {};
+  const flaggedItems = [];
+  logs.forEach(l => {
+    const text = (l.ingredients_raw || l.food_name || '').toLowerCase();
+    flagsCache.forEach(f => {
+      if(text.includes(f.keyword.toLowerCase())){
+        catCounts[f.category] = (catCounts[f.category]||0) + 1;
+        flaggedItems.push({food: l.food_name, category: f.category, date: l.date});
+      }
+    });
+  });
+  const max = Math.max(1, ...Object.values(catCounts));
+
+  panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">This week's inflammatory load</h2>
+      <p class="muted">Based on ingredient text from scanned or searched foods, matched against seed oils, added sugars, refined grains, processed meats, and additives. Manual entries without ingredient text aren't scanned.</p>
+      ${Object.keys(catCounts).length ? Object.entries(catCounts).map(([cat,count]) => `
+        <div class="flag-cat">
+          <div style="width:130px;font-size:13px;text-transform:capitalize;">${esc(cat)}</div>
+          <div class="flag-bar-track"><div class="flag-bar-fill" style="width:${(count/max)*100}%;"></div></div>
+          <div class="flag-count">${count}</div>
+        </div>
+      `).join('') : `<p class="empty-state">No flags this week — nicely clean 🌿</p>`}
+    </div>
+    <div class="card">
+      <h2 class="section-title">Flagged items</h2>
+      ${flaggedItems.length ? flaggedItems.map(i => `<div class="food-row"><div class="food-name">${esc(i.food)}</div><div class="muted">${esc(i.category)} · ${i.date}</div></div>`).join('') : `<p class="empty-state">Nothing flagged this week.</p>`}
+    </div>
+  `;
+}
+
+// ---------- PROGRESS ----------
+async function renderProgress(panel){
+  const uid = session.user.id;
+  const checkins = await supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&weight=not.is.null&order=date.asc&select=date,weight`);
+  const latest = checkins.length ? checkins[checkins.length-1].weight : profile.starting_weight;
+  const start = profile.starting_weight, goal = profile.goal_weight;
+  const totalDelta = Math.abs(start - goal) || 1;
+  const progressed = Math.max(0, Math.min(1, Math.abs(start - latest) / totalDelta));
+
+  let chartSvg = `<p class="empty-state">Log a few check-ins to see your trend line.</p>`;
+  if(checkins.length >= 2){
+    const w = 640, h = 160, pad = 20;
+    const weights = checkins.map(c=>+c.weight);
+    const minW = Math.min(...weights, goal) - 1, maxW = Math.max(...weights, start) + 1;
+    const pts = checkins.map((c,i) => {
+      const x = pad + (i/(checkins.length-1)) * (w-2*pad);
+      const y = h - pad - ((c.weight - minW)/(maxW-minW)) * (h-2*pad);
+      return `${x},${y}`;
+    }).join(' ');
+    const goalY = h - pad - ((goal - minW)/(maxW-minW)) * (h-2*pad);
+    chartSvg = `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <line x1="${pad}" y1="${goalY}" x2="${w-pad}" y2="${goalY}" stroke="var(--gold)" stroke-dasharray="4 4" stroke-width="1.5"/>
+      <polyline points="${pts}" fill="none" stroke="var(--sage-600)" stroke-width="2.5"/>
+      ${checkins.map((c,i)=>{const x=pad+(i/(checkins.length-1))*(w-2*pad);const y=h-pad-((c.weight-minW)/(maxW-minW))*(h-2*pad);return `<circle cx="${x}" cy="${y}" r="3.5" fill="var(--sage-700)"/>`;}).join('')}
+    </svg>`;
+  }
+
+  panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">Weight progress</h2>
+      <div class="weight-now">${latest} lbs</div>
+      <div class="weight-goal">Goal: ${goal} lbs &nbsp;·&nbsp; Started at ${start} lbs</div>
+      <div class="stem-wrap">
+        <div class="stem-track">
+          <div class="stem-fill" style="width:${progressed*100}%;"></div>
+          <div class="stem-leaf" style="left:${progressed*100}%;">${leafSvg('var(--sage-700)',20)}</div>
+        </div>
+        <div class="stem-labels"><span>${start} lbs</span><span>${goal} lbs</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2 class="section-title">Trend</h2>
+      ${chartSvg}
+    </div>
+  `;
+}
+
+// ---------- HABITS ----------
+async function renderHabits(panel){
+  const uid = session.user.id;
+  const habits = await supa(`/rest/v1/habits?user_id=eq.${uid}&order=created_at.asc&select=*`);
+  panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">Add a habit</h2>
+      <div class="row">
+        <div class="field" style="flex:2;min-width:180px;"><label>Habit name</label><input type="text" id="h-name" placeholder="e.g. Take supplements"></div>
+        <div class="field" style="min-width:140px;"><label>Times per week</label><input type="number" id="h-freq" value="7" min="1" max="7"></div>
+      </div>
+      <button class="btn btn-primary" id="add-habit" style="width:auto;padding:11px 26px;">Add habit</button>
+    </div>
+    <div class="card">
+      <h2 class="section-title">Your habits</h2>
+      ${habits.filter(h=>h.active).length ? habits.filter(h=>h.active).map(h => `
+        <div class="habit-item">
+          <div><div class="habit-name">${esc(h.name)}</div><div class="habit-freq">${h.target_frequency}x / week</div></div>
+          <button class="small-btn del-habit" data-id="${h.id}">Remove</button>
+        </div>
+      `).join('') : `<p class="empty-state">No habits yet.</p>`}
+    </div>
+  `;
+  $('#add-habit').onclick = async () => {
+    const name = $('#h-name').value.trim();
+    if(!name) return;
+    const freq = parseInt($('#h-freq').value)||7;
+    await supa('/rest/v1/habits', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify({user_id:uid, name, target_frequency:freq, active:true})});
+    renderHabits(panel);
+  };
+  panel.querySelectorAll('.del-habit').forEach(b => b.onclick = async () => {
+    await supa(`/rest/v1/habits?id=eq.${b.dataset.id}`, {method:'PATCH', body: JSON.stringify({active:false})});
+    renderHabits(panel);
+  });
+}
+
+// ---------- SCRIPTURE ----------
+async function renderScripture(panel){
+  const scriptures = await supa('/rest/v1/scriptures?order=display_order.asc&select=*');
+  if(!scriptures.length){ panel.innerHTML = `<p class="empty-state">No scriptures loaded yet.</p>`; return; }
+  const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(),0,0)) / 86400000);
+  const verse = scriptures[dayOfYear % scriptures.length];
+  panel.innerHTML = `
+    <div class="card scripture-card">
+      ${leafSvg('var(--gold)',22)}
+      <p class="scripture-text">"${esc(verse.verse_text)}"</p>
+      <p class="scripture-ref">${esc(verse.reference)}</p>
+    </div>
+  `;
+}
+
+init();
+</script>
+</body>
+</html>
