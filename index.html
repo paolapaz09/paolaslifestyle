@@ -134,6 +134,21 @@
   .scripture-ref{margin-top:14px;font-size:13px;color:var(--gold);font-weight:600;letter-spacing:0.4px;text-transform:uppercase;}
 
   .empty-state{text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;}
+  .donut-wrap{display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-top:6px;}
+  .donut-legend{display:flex;flex-direction:column;gap:8px;}
+  .legend-item{display:flex;align-items:center;gap:8px;font-size:13px;}
+  .legend-dot{width:11px;height:11px;border-radius:3px;flex-shrink:0;}
+  .habit-perf{margin-top:6px;}
+  .habit-perf-row{margin-bottom:12px;}
+  .habit-perf-top{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;}
+  .habit-perf-track{background:var(--sage-100);border-radius:6px;height:8px;overflow:hidden;}
+  .habit-perf-fill{background:var(--sage-500);height:8px;border-radius:6px;}
+  .qty-row{display:flex;align-items:center;gap:8px;}
+  .qty-row input{width:80px;}
+  .serving-note{font-size:12px;color:var(--ink-soft);margin:-6px 0 12px;}
+  .refresh-verse{background:none;border:1px solid var(--gold);color:var(--gold);border-radius:18px;padding:6px 16px;font-size:12px;font-weight:600;margin-top:16px;}
+  .refresh-verse:hover{background:var(--gold);color:#fff;}
+  .declaration{font-size:13px;color:var(--ink-soft);margin-top:12px;font-style:normal;padding-top:12px;border-top:1px solid var(--line);}
   .add-toggle{background:var(--sage-100);color:var(--sage-700);border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;}
   .add-toggle:hover{background:var(--sage-200);}
   .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
@@ -404,6 +419,10 @@ async function renderFood(panel){
         ${logs.length? logs.map(foodRow).join('') : `<p class="empty-state">Nothing logged yet today.</p>`}
       </div>
     </div>
+    <div class="card">
+      <h2 class="section-title">Macro breakdown</h2>
+      ${macroDonut(totals)}
+    </div>
   `;
   panel.querySelectorAll('.del-food').forEach(b => b.onclick = async () => {
     await supa(`/rest/v1/food_logs?id=eq.${b.dataset.id}`, {method:'DELETE'});
@@ -437,13 +456,19 @@ async function renderFood(panel){
           $('#usda-results').querySelectorAll('.search-result').forEach(el => el.onclick = () => {
             const f = foods[el.dataset.idx];
             const getN = name => (f.foodNutrients.find(n => (n.nutrientName||'').includes(name))||{}).value || 0;
+            let servingLabel = 'per 100g (USDA standard reference amount)';
+            if(f.servingSize && f.servingSizeUnit){
+              servingLabel = `per label serving: ${f.servingSize}${f.servingSizeUnit}`;
+              if(f.householdServingFullText) servingLabel += ` (${f.householdServingFullText})`;
+            }
             pendingFood = {
               food_name: f.description,
               calories: getN('Energy'),
               protein: getN('Protein'),
               carbs: getN('Carbohydrate'),
               fat: getN('Total lipid'),
-              source: 'usda'
+              source: 'usda',
+              servingLabel
             };
             area.innerHTML = manualFormHtml(pendingFood);
             wireManualForm();
@@ -452,6 +477,14 @@ async function renderFood(panel){
       };
     } else if(mode==='scan'){
       area.innerHTML = `<div id="reader"></div><p class="muted" style="text-align:center;">Point your camera at a barcode.</p>`;
+      if(!window.isSecureContext){
+        area.innerHTML = `<p class="auth-error">Camera access needs a secure (https) connection. If you opened this through the GitHub Pages link that's fine — this only shows if you're on plain http.</p>`;
+        return;
+      }
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        area.innerHTML = `<p class="auth-error">This browser doesn't support camera access. Try Chrome or Safari, or use manual entry / search instead.</p>`;
+        return;
+      }
       const qr = new Html5Qrcode('reader');
       qr.start({facingMode:'environment'}, {fps:10, qrbox:220}, async (decoded) => {
         qr.stop();
@@ -470,12 +503,17 @@ async function renderFood(panel){
             fat: n['fat_100g'] || n['fat_serving'] || 0,
             source: 'barcode',
             barcode: decoded,
-            ingredients_raw: p.ingredients_text || ''
+            ingredients_raw: p.ingredients_text || '',
+            servingLabel: 'per 100g (package label)'
           };
-          area.innerHTML = `<p class="muted">Values shown are per 100g — adjust if needed.</p>` + manualFormHtml(pendingFood);
+          area.innerHTML = manualFormHtml(pendingFood);
           wireManualForm();
-        }catch(e){ area.innerHTML = `<p class="auth-error">Lookup failed.</p>`; }
-      }, ()=>{}).catch(()=>{ area.innerHTML = `<p class="auth-error">Camera unavailable. Try manual entry instead.</p>`; });
+        }catch(e){ area.innerHTML = `<p class="auth-error">Lookup failed — check your connection and try again.</p>`; }
+      }, ()=>{}).catch((err)=>{
+        const msg = (err && err.toString) ? err.toString() : 'Unknown error';
+        area.innerHTML = `<p class="auth-error">Camera couldn't start: ${esc(msg)}</p>
+          <p class="muted">Most likely fix: tap the padlock/site-info icon next to the address bar → Site settings → Camera → Allow. Then reload this page. If you're viewing this inside a Claude conversation instead of the GitHub Pages link, camera access won't work there — open your github.io link directly.</p>`;
+      });
     }
   }
 
@@ -487,25 +525,31 @@ async function renderFood(panel){
           <select id="f-meal"><option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option></select>
         </div>
       </div>
+      ${prefill.servingLabel ? `<p class="serving-note">Base values shown below are ${esc(prefill.servingLabel)}.</p>` : ''}
       <div class="row">
         <div class="field"><label>Calories</label><input type="number" id="f-cal" value="${prefill.calories||''}"></div>
         <div class="field"><label>Protein (g)</label><input type="number" id="f-p" value="${prefill.protein||''}"></div>
         <div class="field"><label>Carbs (g)</label><input type="number" id="f-c" value="${prefill.carbs||''}"></div>
         <div class="field"><label>Fat (g)</label><input type="number" id="f-f" value="${prefill.fat||''}"></div>
       </div>
+      <div class="field" style="max-width:220px;">
+        <label>How many servings did you have?</label>
+        <div class="qty-row"><input type="number" id="f-qty" value="1" step="0.25" min="0.1"><span class="muted">× the values above</span></div>
+      </div>
       <button class="btn btn-primary" id="save-food" style="width:auto;padding:11px 26px;">Add to today's log</button>
     `;
   }
   function wireManualForm(){
     $('#save-food').onclick = async () => {
+      const qty = parseFloat($('#f-qty')?.value) || 1;
       const body = {
         user_id: uid, date: todayStr(),
         meal: $('#f-meal').value,
         food_name: $('#f-name').value.trim() || 'Untitled food',
-        calories: parseFloat($('#f-cal').value)||0,
-        protein: parseFloat($('#f-p').value)||0,
-        carbs: parseFloat($('#f-c').value)||0,
-        fat: parseFloat($('#f-f').value)||0,
+        calories: (parseFloat($('#f-cal').value)||0) * qty,
+        protein: (parseFloat($('#f-p').value)||0) * qty,
+        carbs: (parseFloat($('#f-c').value)||0) * qty,
+        fat: (parseFloat($('#f-f').value)||0) * qty,
         source: (pendingFood && pendingFood.source) || 'manual',
         barcode: pendingFood?.barcode || null,
         ingredients_raw: pendingFood?.ingredients_raw || null
@@ -515,6 +559,31 @@ async function renderFood(panel){
       renderFood(panel);
     };
   }
+}
+function macroDonut(totals){
+  const pCal = totals.p*4, cCal = totals.c*4, fCal = totals.f*9;
+  const sum = pCal + cCal + fCal;
+  if(sum <= 0) return `<p class="empty-state">Log some food to see your macro split.</p>`;
+  const colors = {protein:'var(--sage-600)', carbs:'var(--gold)', fat:'var(--rust)'};
+  const slices = [['protein',pCal],['carbs',cCal],['fat',fCal]];
+  const r = 60, cx = 70, cy = 70, circumference = 2*Math.PI*r;
+  let offset = 0;
+  const paths = slices.map(([name,val]) => {
+    const frac = val/sum;
+    const dash = frac*circumference;
+    const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${colors[name]}" stroke-width="18" stroke-dasharray="${dash} ${circumference-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    offset += dash;
+    return seg;
+  }).join('');
+  return `
+    <div class="donut-wrap">
+      <svg width="140" height="140" viewBox="0 0 140 140">${paths}<text x="70" y="74" text-anchor="middle" font-family="Fraunces,serif" font-size="16" fill="var(--ink)">${Math.round(sum)} cal</text></svg>
+      <div class="donut-legend">
+        <div class="legend-item"><span class="legend-dot" style="background:var(--sage-600);"></span>Protein — ${Math.round(totals.p)}g (${Math.round(pCal/sum*100)}%)</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--gold);"></span>Carbs — ${Math.round(totals.c)}g (${Math.round(cCal/sum*100)}%)</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--rust);"></span>Fat — ${Math.round(totals.f)}g (${Math.round(fCal/sum*100)}%)</div>
+      </div>
+    </div>`;
 }
 function foodRow(l){
   return `<div class="food-row">
@@ -536,7 +605,7 @@ async function renderInflammatory(panel){
   const catCounts = {};
   const flaggedItems = [];
   logs.forEach(l => {
-    const text = (l.ingredients_raw || l.food_name || '').toLowerCase();
+    const text = `${l.food_name||''} ${l.ingredients_raw||''}`.toLowerCase();
     flagsCache.forEach(f => {
       if(text.includes(f.keyword.toLowerCase())){
         catCounts[f.category] = (catCounts[f.category]||0) + 1;
@@ -549,7 +618,7 @@ async function renderInflammatory(panel){
   panel.innerHTML = `
     <div class="card">
       <h2 class="section-title">This week's inflammatory load</h2>
-      <p class="muted">Based on ingredient text from scanned or searched foods, matched against seed oils, added sugars, refined grains, processed meats, and additives. Manual entries without ingredient text aren't scanned.</p>
+      <p class="muted">Checks both the food name you logged and any ingredient text (from barcode scans) against a list of seed oils, added sugars, refined grains, processed meats, and additives. So "mayo" or "chocolate cake" gets flagged from the name alone — barcode scans go further and check the full ingredient list too.</p>
       ${Object.keys(catCounts).length ? Object.entries(catCounts).map(([cat,count]) => `
         <div class="flag-cat">
           <div style="width:130px;font-size:13px;text-transform:capitalize;">${esc(cat)}</div>
@@ -615,7 +684,15 @@ async function renderProgress(panel){
 // ---------- HABITS ----------
 async function renderHabits(panel){
   const uid = session.user.id;
-  const habits = await supa(`/rest/v1/habits?user_id=eq.${uid}&order=created_at.asc&select=*`);
+  const weekAgo = new Date(Date.now() - 6*86400000).toISOString().slice(0,10);
+  const [habits, weekLogs] = await Promise.all([
+    supa(`/rest/v1/habits?user_id=eq.${uid}&order=created_at.asc&select=*`),
+    supa(`/rest/v1/habit_logs?user_id=eq.${uid}&date=gte.${weekAgo}&completed=eq.true&select=habit_id,date`)
+  ]);
+  const activeHabits = habits.filter(h=>h.active);
+  const countByHabit = {};
+  weekLogs.forEach(l => countByHabit[l.habit_id] = (countByHabit[l.habit_id]||0) + 1);
+
   panel.innerHTML = `
     <div class="card">
       <h2 class="section-title">Add a habit</h2>
@@ -626,8 +703,21 @@ async function renderHabits(panel){
       <button class="btn btn-primary" id="add-habit" style="width:auto;padding:11px 26px;">Add habit</button>
     </div>
     <div class="card">
+      <h2 class="section-title">This week's performance</h2>
+      <div class="habit-perf">
+        ${activeHabits.length ? activeHabits.map(h => {
+          const done = countByHabit[h.id] || 0;
+          const pct = Math.min(100, Math.round((done/h.target_frequency)*100));
+          return `<div class="habit-perf-row">
+            <div class="habit-perf-top"><span>${esc(h.name)}</span><span class="muted">${done} / ${h.target_frequency} this week</span></div>
+            <div class="habit-perf-track"><div class="habit-perf-fill" style="width:${pct}%;"></div></div>
+          </div>`;
+        }).join('') : `<p class="empty-state">Add a habit below to start tracking performance.</p>`}
+      </div>
+    </div>
+    <div class="card">
       <h2 class="section-title">Your habits</h2>
-      ${habits.filter(h=>h.active).length ? habits.filter(h=>h.active).map(h => `
+      ${activeHabits.length ? activeHabits.map(h => `
         <div class="habit-item">
           <div><div class="habit-name">${esc(h.name)}</div><div class="habit-freq">${h.target_frequency}x / week</div></div>
           <button class="small-btn del-habit" data-id="${h.id}">Remove</button>
@@ -649,18 +739,46 @@ async function renderHabits(panel){
 }
 
 // ---------- SCRIPTURE ----------
+const DECLARATIONS = {
+  'body as temple': "I honor my body today as something sacred, not something to punish.",
+  'strength': "I am stronger than I feel right now. Today I choose to keep going.",
+  'health': "My body is healing and I am building a life of health, one day at a time.",
+  'identity': "I am fearfully and wonderfully made — my worth isn't measured by a number on a scale.",
+  'stewardship': "Every choice I make today is an offering, cared for on purpose.",
+  'renewal': "Today is a fresh start. My best days are still ahead of me.",
+  'perseverance': "I don't have to be perfect today — I just have to keep showing up.",
+  'peace': "I release anxiety about my progress and trust the process I'm in.",
+  'healing': "My body knows how to heal, and I'm giving it what it needs to do that.",
+};
 async function renderScripture(panel){
   const scriptures = await supa('/rest/v1/scriptures?order=display_order.asc&select=*');
   if(!scriptures.length){ panel.innerHTML = `<p class="empty-state">No scriptures loaded yet.</p>`; return; }
   const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(),0,0)) / 86400000);
-  const verse = scriptures[dayOfYear % scriptures.length];
-  panel.innerHTML = `
-    <div class="card scripture-card">
-      ${leafSvg('var(--gold)',22)}
-      <p class="scripture-text">"${esc(verse.verse_text)}"</p>
-      <p class="scripture-ref">${esc(verse.reference)}</p>
-    </div>
-  `;
+  await showVerse(scriptures[dayOfYear % scriptures.length], scriptures);
+
+  async function showVerse(entry, list){
+    panel.innerHTML = `<div class="card scripture-card">${leafSvg('var(--gold)',22)}<p class="muted">Loading today's verse…</p></div>`;
+    let text = entry.verse_text, ref = entry.reference;
+    try{
+      const res = await fetch(`https://bible-api.com/${encodeURIComponent(entry.reference)}?translation=web`);
+      const data = await res.json();
+      if(data && data.text){ text = data.text.trim(); ref = data.reference || entry.reference; }
+    }catch(e){ /* fall back to stored text if API is unreachable */ }
+    const declaration = DECLARATIONS[entry.theme] || '';
+    panel.innerHTML = `
+      <div class="card scripture-card">
+        ${leafSvg('var(--gold)',22)}
+        <p class="scripture-text">"${esc(text)}"</p>
+        <p class="scripture-ref">${esc(ref)}</p>
+        ${declaration ? `<p class="declaration">${esc(declaration)}</p>` : ''}
+        <button class="refresh-verse" id="shuffle-verse">Show me another</button>
+      </div>
+    `;
+    $('#shuffle-verse').onclick = () => {
+      const other = list[Math.floor(Math.random()*list.length)];
+      showVerse(other, list);
+    };
+  }
 }
 
 init();
