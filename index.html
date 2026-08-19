@@ -562,12 +562,18 @@ let pendingFood = null;
 let foodSelectedDate = todayStr();
 async function renderFood(panel){
   const uid = session.user.id;
-  const [logs, checkins] = await Promise.all([
+  const [logs, checkins, presets] = await Promise.all([
     supa(`/rest/v1/food_logs?user_id=eq.${uid}&date=eq.${foodSelectedDate}&order=created_at.asc&select=*`),
-    supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&date=eq.${foodSelectedDate}&select=day_completed`)
+    supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&date=eq.${foodSelectedDate}&select=day_completed,macro_preset_id`),
+    supa(`/rest/v1/macro_presets?user_id=eq.${uid}&order=created_at.asc&select=*`)
   ]);
   const totals = logs.reduce((a,l)=>({cal:a.cal+(+l.calories||0),p:a.p+(+l.protein||0),c:a.c+(+l.carbs||0),f:a.f+(+l.fat||0)}),{cal:0,p:0,c:0,f:0});
   const dayCompleted = checkins[0]?.day_completed || false;
+  const activePresetId = checkins[0]?.macro_preset_id || '';
+  const activePreset = presets.find(p => p.id === activePresetId);
+  const effectiveTargets = activePreset
+    ? { target_calories: activePreset.calories, target_protein: activePreset.protein, target_carbs: activePreset.carbs, target_fat: activePreset.fat, macro_tolerance_pct: profile.macro_tolerance_pct }
+    : profile;
   const label = formatDateLabel(foodSelectedDate);
   const isFuture = foodSelectedDate >= todayStr();
 
@@ -582,6 +588,15 @@ async function renderFood(panel){
         </div>
         <button class="date-nav-btn" id="food-next" ${isFuture?'disabled':''}>›</button>
       </div>
+      ${presets.length ? `
+        <div class="field" style="margin-top:14px;margin-bottom:0;">
+          <label>Macro plan for this day</label>
+          <select id="preset-select">
+            <option value="">Default goals</option>
+            ${presets.map(p => `<option value="${p.id}" ${p.id===activePresetId?'selected':''}>${esc(p.name)} (${Math.round(p.calories)} cal)</option>`).join('')}
+          </select>
+        </div>
+      ` : ''}
     </div>
     ${dayCompleted ? `
     <div class="card" style="text-align:center;">
@@ -616,13 +631,19 @@ async function renderFood(panel){
     </div>
     <div class="card">
       <h2 class="section-title">Macro breakdown</h2>
-      ${macroDonut(totals, profile)}
+      ${macroDonut(totals, effectiveTargets)}
     </div>
+    ${!dayCompleted ? `<div class="card"><h2 class="section-title">Foods to help close the gap</h2><div id="food-suggestions">${foodSuggestionsHtml(totals, effectiveTargets)}</div></div>` : ''}
   `;
   $('#food-prev').onclick = () => { foodSelectedDate = addDays(foodSelectedDate,-1); renderFood(panel); };
   $('#food-next').onclick = () => { if(!isFuture){ foodSelectedDate = addDays(foodSelectedDate,1); renderFood(panel); } };
   const jumpBtn = $('#food-jump');
   if(jumpBtn) jumpBtn.onclick = () => { foodSelectedDate = todayStr(); renderFood(panel); };
+  const presetSelect = $('#preset-select');
+  if(presetSelect) presetSelect.onchange = async () => {
+    await supa(`/rest/v1/daily_checkins?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, date:foodSelectedDate, macro_preset_id: presetSelect.value || null})});
+    renderFood(panel);
+  };
   const completeBtn = $('#complete-day');
   if(completeBtn) completeBtn.onclick = async () => {
     await supa(`/rest/v1/daily_checkins?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, date:foodSelectedDate, day_completed:true})});
@@ -861,6 +882,75 @@ async function renderFood(panel){
     };
   }
 }
+// ---------- FOOD SUGGESTIONS ----------
+const SUGGESTION_FOODS = [
+  {name:'Grilled chicken breast', serving:'4 oz', calories:187, protein:35, carbs:0, fat:4},
+  {name:'Salmon fillet', serving:'4 oz', calories:233, protein:25, carbs:0, fat:14},
+  {name:'Plain Greek yogurt', serving:'1 cup', calories:150, protein:25, carbs:9, fat:4},
+  {name:'Eggs', serving:'2 large', calories:140, protein:12, carbs:1, fat:10},
+  {name:'Cottage cheese', serving:'1 cup', calories:180, protein:25, carbs:8, fat:5},
+  {name:'Turkey breast', serving:'4 oz', calories:146, protein:33, carbs:0, fat:1},
+  {name:'Tofu', serving:'1 cup', calories:181, protein:20, carbs:5, fat:11},
+  {name:'Lentils, cooked', serving:'1 cup', calories:230, protein:18, carbs:40, fat:1},
+  {name:'Black beans, cooked', serving:'1 cup', calories:227, protein:15, carbs:41, fat:1},
+  {name:'Quinoa, cooked', serving:'1 cup', calories:222, protein:8, carbs:39, fat:4},
+  {name:'Sweet potato', serving:'1 medium', calories:112, protein:2, carbs:26, fat:0},
+  {name:'Brown rice, cooked', serving:'1 cup', calories:216, protein:5, carbs:45, fat:2},
+  {name:'Banana', serving:'1 medium', calories:105, protein:1, carbs:27, fat:0},
+  {name:'Blueberries', serving:'1 cup', calories:84, protein:1, carbs:21, fat:0},
+  {name:'Oats, cooked', serving:'1 cup', calories:158, protein:6, carbs:27, fat:3},
+  {name:'Avocado', serving:'1/2 medium', calories:120, protein:1, carbs:6, fat:11},
+  {name:'Almonds', serving:'1 oz (~23)', calories:164, protein:6, carbs:6, fat:14},
+  {name:'Walnuts', serving:'1 oz (~14 halves)', calories:185, protein:4, carbs:4, fat:18},
+  {name:'Olive oil', serving:'1 tbsp', calories:119, protein:0, carbs:0, fat:14},
+  {name:'Hummus', serving:'1/4 cup', calories:104, protein:5, carbs:12, fat:5},
+  {name:'Spinach, sauteed', serving:'1 cup', calories:41, protein:5, carbs:7, fat:0},
+  {name:'Broccoli, steamed', serving:'1 cup', calories:55, protein:4, carbs:11, fat:0},
+];
+
+function foodSuggestionsHtml(totals, targets){
+  if(targets?.target_calories == null) return `<p class="empty-state">Set a calorie/macro target in the Progress tab to get personalized suggestions here.</p>`;
+  const remCal = targets.target_calories - totals.cal;
+  const remP = (targets.target_protein ?? null) != null ? targets.target_protein - totals.p : null;
+  const remC = (targets.target_carbs ?? null) != null ? targets.target_carbs - totals.c : null;
+  const remF = (targets.target_fat ?? null) != null ? targets.target_fat - totals.f : null;
+
+  if(remCal <= 20) return `<p class="empty-state">You're at or past your calorie goal for the day — nice work. No suggestions needed.</p>`;
+
+  // find which macro has the biggest remaining gap, in grams-equivalent terms
+  const gaps = [];
+  if(remP != null && remP > 3) gaps.push(['protein', remP]);
+  if(remC != null && remC > 3) gaps.push(['carbs', remC]);
+  if(remF != null && remF > 3) gaps.push(['fat', remF]);
+  gaps.sort((a,b) => b[1]-a[1]);
+  const priority = gaps.length ? gaps[0][0] : null;
+
+  const candidates = SUGGESTION_FOODS.filter(f => f.calories <= remCal * 1.3);
+  let sorted;
+  if(priority === 'protein') sorted = candidates.slice().sort((a,b) => b.protein - a.protein);
+  else if(priority === 'carbs') sorted = candidates.slice().sort((a,b) => b.carbs - a.carbs);
+  else if(priority === 'fat') sorted = candidates.slice().sort((a,b) => b.fat - a.fat);
+  else sorted = candidates.slice().sort((a,b) => Math.abs(a.calories-remCal) - Math.abs(b.calories-remCal));
+
+  const top = sorted.slice(0,4);
+  if(!top.length) return `<p class="empty-state">Not much room left in your calorie budget for a full suggestion — a small snack like a few almonds or some berries could round out the day.</p>`;
+
+  return `
+    <p class="muted">You have about <b>${Math.round(remCal)} cal</b> left${priority ? `, and ${priority} is your biggest remaining gap` : ''}. A few options that would help:</p>
+    <div style="margin-top:10px;">
+      ${top.map(f => `
+        <div class="food-row">
+          <div>
+            <div class="food-name">${esc(f.name)} <span class="muted">· ${esc(f.serving)}</span></div>
+            <div class="food-macros"><span class="macro-pill">${f.calories} cal</span><span class="macro-pill">${f.protein}g P</span><span class="macro-pill">${f.carbs}g C</span><span class="macro-pill">${f.fat}g F</span></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <p class="muted" style="margin-top:10px;">Estimated values — search or scan the real item to log it precisely.</p>
+  `;
+}
+
 function macroDonut(totals, profile){
   const pCal = totals.p*4, cCal = totals.c*4, fCal = totals.f*9;
   const macroSum = pCal + cCal + fCal;
@@ -966,6 +1056,7 @@ async function renderInflammatory(panel){
 async function renderProgress(panel){
   const uid = session.user.id;
   const checkins = await supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&weight=not.is.null&order=date.asc&select=date,weight`);
+  const presets = await supa(`/rest/v1/macro_presets?user_id=eq.${uid}&order=created_at.asc&select=*`);
   const latest = checkins.length ? checkins[checkins.length-1].weight : profile.starting_weight;
   const start = profile.starting_weight, goal = profile.goal_weight;
   const totalDelta = Math.abs(start - goal) || 1;
@@ -1013,34 +1104,194 @@ async function renderProgress(panel){
         <div class="field"><label>Goal weight (lbs)</label><input type="number" step="0.1" id="g-goal" value="${profile.goal_weight ?? ''}"></div>
         <div class="field"><label>Workout goal (per week)</label><input type="number" id="g-workout" value="${profile.workout_goal_per_week ?? ''}"></div>
       </div>
-      <h2 class="section-title" style="margin-top:8px;">Macro targets</h2>
-      <p class="muted" style="margin-top:-6px;margin-bottom:10px;">Leave any of these blank if you don't want to track a target for it.</p>
+      <div class="field" style="max-width:220px;"><label>Target date (optional)</label><input type="date" id="g-date" value="${profile.target_date || ''}"></div>
+
+      <h2 class="section-title" style="margin-top:8px;">Calorie suggestion</h2>
+      <p class="muted" style="margin-top:-6px;">Optional — add these and I'll estimate a daily calorie target to hit your goal weight by your target date. This is a rough estimate, not medical advice — please run it by your doctor, especially alongside your anti-inflammatory diet.</p>
       <div class="row">
-        <div class="field"><label>Calories</label><input type="number" id="g-cal" value="${profile.target_calories ?? ''}"></div>
-        <div class="field"><label>Protein (g)</label><input type="number" id="g-p" value="${profile.target_protein ?? ''}"></div>
-        <div class="field"><label>Carbs (g)</label><input type="number" id="g-c" value="${profile.target_carbs ?? ''}"></div>
-        <div class="field"><label>Fat (g)</label><input type="number" id="g-f" value="${profile.target_fat ?? ''}"></div>
+        <div class="field"><label>Height (inches)</label><input type="number" id="g-height" value="${profile.height_inches ?? ''}"></div>
+        <div class="field"><label>Age</label><input type="number" id="g-age" value="${profile.age ?? ''}"></div>
+        <div class="field"><label>Activity level</label>
+          <select id="g-activity">
+            <option value="sedentary" ${profile.activity_level==='sedentary'?'selected':''}>Sedentary (little exercise)</option>
+            <option value="light" ${profile.activity_level==='light'?'selected':''}>Light (1-3x/week)</option>
+            <option value="moderate" ${profile.activity_level==='moderate'?'selected':''}>Moderate (3-5x/week)</option>
+            <option value="active" ${profile.activity_level==='active'?'selected':''}>Active (6-7x/week)</option>
+          </select>
+        </div>
       </div>
+      <div id="calorie-suggestion-box"></div>
+
+      <h2 class="section-title" style="margin-top:8px;">Macro targets</h2>
+      <p class="muted" style="margin-top:-6px;margin-bottom:6px;">These are your default targets. Leave blank if you don't want to track one.</p>
+      <div class="tag-choice" id="macro-mode-toggle">
+        <button data-mode="grams">Set in grams</button>
+        <button data-mode="percent">Set by % of calories</button>
+      </div>
+      <div class="field"><label>Calories</label><input type="number" id="g-cal" value="${profile.target_calories ?? ''}"></div>
+      <div id="macro-inputs"></div>
       <div class="field" style="max-width:220px;"><label>Tolerance (± %)</label><input type="number" id="g-tol" value="${profile.macro_tolerance_pct ?? 10}"></div>
       <p class="muted" style="margin-top:-4px;">e.g. 10% means hitting within 10% above or below your target counts as "on track" on your macro chart.</p>
       <button class="btn btn-primary" id="save-goals" style="width:auto;padding:11px 26px;margin-top:6px;">Save goals</button>
     </div>
+
+    <div class="card">
+      <h2 class="section-title">Macro presets</h2>
+      <p class="muted">For carb cycling or different day types — create presets here, then pick one for any day in the Food tab.</p>
+      <div id="preset-list">
+        ${presets.length ? presets.map(p => `
+          <div class="habit-item">
+            <div><div class="habit-name">${esc(p.name)}</div><div class="habit-freq">${Math.round(p.calories||0)} cal · ${Math.round(p.protein||0)}g P · ${Math.round(p.carbs||0)}g C · ${Math.round(p.fat||0)}g F</div></div>
+            <button class="small-btn del-preset" data-id="${p.id}">Remove</button>
+          </div>
+        `).join('') : `<p class="empty-state">No presets yet.</p>`}
+      </div>
+      <h2 class="section-title" style="margin-top:14px;">Add a preset</h2>
+      <div class="row">
+        <div class="field" style="flex:2;min-width:160px;"><label>Name</label><input type="text" id="pr-name" placeholder="e.g. Training day, Low carb day"></div>
+        <div class="field"><label>Calories</label><input type="number" id="pr-cal" value="1500"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Protein %</label><input type="number" id="pr-p-pct" value="40"></div>
+        <div class="field"><label>Carbs %</label><input type="number" id="pr-c-pct" value="30"></div>
+        <div class="field"><label>Fat %</label><input type="number" id="pr-f-pct" value="30"></div>
+      </div>
+      <p class="muted" id="preset-pct-total"></p>
+      <button class="btn btn-ghost" id="add-preset" style="width:auto;padding:9px 20px;">Add preset</button>
+    </div>
   `;
+
+  // ---- macro mode toggle (grams vs percent) ----
+  let macroMode = (profile.target_protein_pct != null) ? 'percent' : 'grams';
+  function renderMacroInputs(){
+    const cal = parseFloat($('#g-cal').value) || 0;
+    $('#macro-mode-toggle').querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.mode===macroMode));
+    const box = $('#macro-inputs');
+    if(macroMode === 'grams'){
+      box.innerHTML = `
+        <div class="row">
+          <div class="field"><label>Protein (g)</label><input type="number" id="g-p" value="${profile.target_protein ?? ''}"></div>
+          <div class="field"><label>Carbs (g)</label><input type="number" id="g-c" value="${profile.target_carbs ?? ''}"></div>
+          <div class="field"><label>Fat (g)</label><input type="number" id="g-f" value="${profile.target_fat ?? ''}"></div>
+        </div>
+      `;
+    } else {
+      const pp = profile.target_protein_pct ?? '', cp = profile.target_carbs_pct ?? '', fp = profile.target_fat_pct ?? '';
+      box.innerHTML = `
+        <div class="row">
+          <div class="field"><label>Protein %</label><input type="number" id="g-p-pct" value="${pp}"></div>
+          <div class="field"><label>Carbs %</label><input type="number" id="g-c-pct" value="${cp}"></div>
+          <div class="field"><label>Fat %</label><input type="number" id="g-f-pct" value="${fp}"></div>
+        </div>
+        <p class="muted" id="pct-grams-preview"></p>
+      `;
+      const updatePreview = () => {
+        const p = parseFloat($('#g-p-pct').value)||0, c = parseFloat($('#g-c-pct').value)||0, f = parseFloat($('#g-f-pct').value)||0;
+        const total = p+c+f;
+        const pg = Math.round((p/100*cal)/4), cg = Math.round((c/100*cal)/4), fg = Math.round((f/100*cal)/9);
+        $('#pct-grams-preview').innerHTML = `${total}% of calories allocated${Math.abs(total-100)>1?' — doesn\'t need to be exactly 100%, that\'s fine for flexible days':''}. At ${Math.round(cal)} cal, that's roughly <b>${pg}g protein · ${cg}g carbs · ${fg}g fat</b>.`;
+      };
+      ['#g-p-pct','#g-c-pct','#g-f-pct'].forEach(sel => $(sel).oninput = updatePreview);
+      updatePreview();
+    }
+  }
+  $('#macro-mode-toggle').querySelectorAll('button').forEach(b => b.onclick = () => { macroMode = b.dataset.mode; renderMacroInputs(); });
+  $('#g-cal').oninput = () => { if(macroMode==='percent') renderMacroInputs(); };
+  renderMacroInputs();
+
+  // ---- calorie suggestion based on target date + TDEE estimate ----
+  function renderCalorieSuggestion(){
+    const targetDate = $('#g-date').value;
+    const heightIn = parseFloat($('#g-height').value);
+    const age = parseInt($('#g-age').value);
+    const activity = $('#g-activity').value;
+    const goalW = parseFloat($('#g-goal').value) || profile.goal_weight;
+    const box = $('#calorie-suggestion-box');
+    if(!targetDate || !goalW){ box.innerHTML = ''; return; }
+    const daysRemaining = Math.ceil((new Date(targetDate) - new Date(todayStr())) / 86400000);
+    if(daysRemaining <= 0){ box.innerHTML = `<p class="auth-error">Target date should be in the future.</p>`; return; }
+    const currentWeight = latest;
+    const lbsToLose = currentWeight - goalW;
+    const weeksRemaining = daysRemaining / 7;
+    const weeklyRate = lbsToLose / weeksRemaining;
+    let html = `<p class="muted">At this pace: about <b>${weeklyRate.toFixed(1)} lbs/week</b> over ${Math.round(weeksRemaining)} weeks.</p>`;
+    let warning = '';
+    if(Math.abs(weeklyRate) > 2) warning += "That's faster than the commonly recommended max of ~2 lbs/week — a later target date would be gentler. ";
+    if(heightIn && age){
+      const weightKg = currentWeight * 0.4536, heightCm = heightIn * 2.54;
+      const bmr = 10*weightKg + 6.25*heightCm - 5*age - 161;
+      const activityMap = {sedentary:1.2, light:1.375, moderate:1.55, active:1.725};
+      const maintenance = bmr * (activityMap[activity]||1.2);
+      const dailyDeficit = (lbsToLose*3500) / daysRemaining;
+      let suggestedCal = Math.round(maintenance - dailyDeficit);
+      if(suggestedCal < 1200){ warning += "This pace would put you under 1200 cal/day, generally considered too low without medical supervision — please check with your doctor before going this low. "; }
+      html += `<p class="muted">Estimated maintenance: <b>${Math.round(maintenance)} cal/day</b>. Suggested target: <b>${suggestedCal} cal/day</b>.</p>`;
+      if(warning) html += `<p class="serving-note">${esc(warning)}</p>`;
+      html += `<button class="btn-ghost" id="use-suggested-cal" style="padding:6px 14px;font-size:12px;">Use ${suggestedCal} as my calorie target</button>`;
+    } else {
+      html += `<p class="muted">Add height and age above for a personalized calorie estimate.</p>`;
+    }
+    box.innerHTML = html;
+    const useBtn = $('#use-suggested-cal');
+    if(useBtn) useBtn.onclick = () => { $('#g-cal').value = useBtn.textContent.match(/\d+/)[0]; if(macroMode==='percent') renderMacroInputs(); };
+  }
+  ['#g-date','#g-height','#g-age','#g-activity','#g-goal'].forEach(sel => $(sel).addEventListener('input', renderCalorieSuggestion));
+  renderCalorieSuggestion();
+
   $('#save-goals').onclick = async () => {
-    const body = {
+    const cal = $('#g-cal').value ? parseFloat($('#g-cal').value) : null;
+    let body = {
       starting_weight: parseFloat($('#g-start').value) || null,
       goal_weight: parseFloat($('#g-goal').value) || null,
       workout_goal_per_week: parseInt($('#g-workout').value) || null,
-      target_calories: $('#g-cal').value ? parseFloat($('#g-cal').value) : null,
-      target_protein: $('#g-p').value ? parseFloat($('#g-p').value) : null,
-      target_carbs: $('#g-c').value ? parseFloat($('#g-c').value) : null,
-      target_fat: $('#g-f').value ? parseFloat($('#g-f').value) : null,
+      target_date: $('#g-date').value || null,
+      height_inches: $('#g-height').value ? parseFloat($('#g-height').value) : null,
+      age: $('#g-age').value ? parseInt($('#g-age').value) : null,
+      activity_level: $('#g-activity').value,
+      target_calories: cal,
       macro_tolerance_pct: $('#g-tol').value ? parseFloat($('#g-tol').value) : 10,
     };
+    if(macroMode === 'grams'){
+      body.target_protein = $('#g-p').value ? parseFloat($('#g-p').value) : null;
+      body.target_carbs = $('#g-c').value ? parseFloat($('#g-c').value) : null;
+      body.target_fat = $('#g-f').value ? parseFloat($('#g-f').value) : null;
+      body.target_protein_pct = null; body.target_carbs_pct = null; body.target_fat_pct = null;
+    } else {
+      const pp = $('#g-p-pct').value ? parseFloat($('#g-p-pct').value) : null;
+      const cp = $('#g-c-pct').value ? parseFloat($('#g-c-pct').value) : null;
+      const fp = $('#g-f-pct').value ? parseFloat($('#g-f-pct').value) : null;
+      body.target_protein_pct = pp; body.target_carbs_pct = cp; body.target_fat_pct = fp;
+      body.target_protein = (pp!=null && cal) ? Math.round((pp/100*cal)/4) : null;
+      body.target_carbs = (cp!=null && cal) ? Math.round((cp/100*cal)/4) : null;
+      body.target_fat = (fp!=null && cal) ? Math.round((fp/100*cal)/9) : null;
+    }
     await supa(`/rest/v1/profiles?id=eq.${uid}`, {method:'PATCH', body: JSON.stringify(body)});
     await ensureProfile();
     renderProgress(panel);
   };
+
+  // ---- macro presets ----
+  const updatePresetPctTotal = () => {
+    const p = parseFloat($('#pr-p-pct').value)||0, c = parseFloat($('#pr-c-pct').value)||0, f = parseFloat($('#pr-f-pct').value)||0;
+    $('#preset-pct-total').textContent = `${p+c+f}% allocated (doesn't need to total exactly 100%)`;
+  };
+  ['#pr-p-pct','#pr-c-pct','#pr-f-pct'].forEach(sel => $(sel).oninput = updatePresetPctTotal);
+  updatePresetPctTotal();
+  $('#add-preset').onclick = async () => {
+    const name = $('#pr-name').value.trim();
+    if(!name) return;
+    const cal = parseFloat($('#pr-cal').value) || 0;
+    const pp = parseFloat($('#pr-p-pct').value)||0, cp = parseFloat($('#pr-c-pct').value)||0, fp = parseFloat($('#pr-f-pct').value)||0;
+    await supa('/rest/v1/macro_presets', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify({
+      user_id: uid, name, calories: cal,
+      protein: Math.round((pp/100*cal)/4), carbs: Math.round((cp/100*cal)/4), fat: Math.round((fp/100*cal)/9)
+    })});
+    renderProgress(panel);
+  };
+  panel.querySelectorAll('.del-preset').forEach(b => b.onclick = async () => {
+    await supa(`/rest/v1/macro_presets?id=eq.${b.dataset.id}`, {method:'DELETE'});
+    renderProgress(panel);
+  });
 }
 
 // ---------- JOURNAL ----------
