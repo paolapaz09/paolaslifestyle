@@ -559,12 +559,38 @@ function habitRow(h, done){
 
 // ---------- FOOD ----------
 let pendingFood = null;
+let foodSelectedDate = todayStr();
 async function renderFood(panel){
   const uid = session.user.id;
-  const logs = await supa(`/rest/v1/food_logs?user_id=eq.${uid}&date=eq.${todayStr()}&order=created_at.asc&select=*`);
+  const [logs, checkins] = await Promise.all([
+    supa(`/rest/v1/food_logs?user_id=eq.${uid}&date=eq.${foodSelectedDate}&order=created_at.asc&select=*`),
+    supa(`/rest/v1/daily_checkins?user_id=eq.${uid}&date=eq.${foodSelectedDate}&select=day_completed`)
+  ]);
   const totals = logs.reduce((a,l)=>({cal:a.cal+(+l.calories||0),p:a.p+(+l.protein||0),c:a.c+(+l.carbs||0),f:a.f+(+l.fat||0)}),{cal:0,p:0,c:0,f:0});
+  const dayCompleted = checkins[0]?.day_completed || false;
+  const label = formatDateLabel(foodSelectedDate);
+  const isFuture = foodSelectedDate >= todayStr();
 
   panel.innerHTML = `
+    <div class="card">
+      <div class="date-nav">
+        <button class="date-nav-btn" id="food-prev">‹</button>
+        <div class="date-nav-label">
+          <div class="big">${label.big}</div>
+          <div class="small">${label.small}</div>
+          ${foodSelectedDate !== todayStr() ? `<button class="jump-today" id="food-jump">Jump to today</button>` : ''}
+        </div>
+        <button class="date-nav-btn" id="food-next" ${isFuture?'disabled':''}>›</button>
+      </div>
+    </div>
+    ${dayCompleted ? `
+    <div class="card" style="text-align:center;">
+      ${leafSvg('var(--sage-600)',26)}
+      <h2 class="section-title" style="text-align:center;">Day complete</h2>
+      <p class="muted">${Math.round(totals.cal)} cal · ${Math.round(totals.p)}g protein · ${Math.round(totals.c)}g carbs · ${Math.round(totals.f)}g fat logged for ${label.big==='Today'?'today':label.small}.</p>
+      <button class="btn btn-ghost" id="reopen-day" style="width:auto;padding:8px 20px;margin-top:8px;">Edit this day</button>
+    </div>
+    ` : `
     <div class="card">
       <h2 class="section-title">Add food</h2>
       <div class="btn-row" style="margin-bottom:14px;">
@@ -574,8 +600,9 @@ async function renderFood(panel){
       </div>
       <div id="add-food-area"></div>
     </div>
+    `}
     <div class="card">
-      <h2 class="section-title">Today's log</h2>
+      <h2 class="section-title">${dayCompleted ? "Log" : "Today's log"}</h2>
       <div class="totals-bar">
         <div class="t"><b>${Math.round(totals.cal)}</b>cal</div>
         <div class="t"><b>${Math.round(totals.p)}g</b>protein</div>
@@ -583,18 +610,34 @@ async function renderFood(panel){
         <div class="t"><b>${Math.round(totals.f)}g</b>fat</div>
       </div>
       <div style="margin-top:14px;">
-        ${logs.length? logs.map(foodRow).join('') : `<p class="empty-state">Nothing logged yet today.</p>`}
+        ${logs.length? logs.map(foodRow).join('') : `<p class="empty-state">Nothing logged for this day.</p>`}
       </div>
+      ${!dayCompleted && logs.length > 0 ? `<button class="btn btn-primary" id="complete-day" style="width:auto;padding:10px 22px;margin-top:14px;">Complete today's log</button>` : ''}
     </div>
     <div class="card">
       <h2 class="section-title">Macro breakdown</h2>
-      ${macroDonut(totals)}
+      ${macroDonut(totals, profile)}
     </div>
   `;
+  $('#food-prev').onclick = () => { foodSelectedDate = addDays(foodSelectedDate,-1); renderFood(panel); };
+  $('#food-next').onclick = () => { if(!isFuture){ foodSelectedDate = addDays(foodSelectedDate,1); renderFood(panel); } };
+  const jumpBtn = $('#food-jump');
+  if(jumpBtn) jumpBtn.onclick = () => { foodSelectedDate = todayStr(); renderFood(panel); };
+  const completeBtn = $('#complete-day');
+  if(completeBtn) completeBtn.onclick = async () => {
+    await supa(`/rest/v1/daily_checkins?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, date:foodSelectedDate, day_completed:true})});
+    renderFood(panel);
+  };
+  const reopenBtn = $('#reopen-day');
+  if(reopenBtn) reopenBtn.onclick = async () => {
+    await supa(`/rest/v1/daily_checkins?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({user_id:uid, date:foodSelectedDate, day_completed:false})});
+    renderFood(panel);
+  };
   panel.querySelectorAll('.del-food').forEach(b => b.onclick = async () => {
     await supa(`/rest/v1/food_logs?id=eq.${b.dataset.id}`, {method:'DELETE'});
     renderFood(panel);
   });
+  if(dayCompleted) return;
   function setActiveToggle(mode){
     ['search','scan','manual'].forEach(m => $('#mode-'+m).classList.toggle('active', m===mode));
   }
@@ -623,7 +666,17 @@ async function renderFood(panel){
           const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&query=${encodeURIComponent(q)}&pageSize=8`);
           const data = await res.json();
           const foods = data.foods || [];
-          $('#usda-results').innerHTML = foods.length ? foods.map((f,i)=>`<div class="search-result" data-idx="${i}">${esc(f.description)}</div>`).join('') : '<p class="muted">No results.</p>';
+          $('#usda-results').innerHTML = foods.length ? foods.map((f,i)=>{
+            const bits = [];
+            if(f.dataType) bits.push(f.dataType);
+            if(f.brandOwner) bits.push(f.brandOwner);
+            if(f.foodCategory) bits.push(f.foodCategory);
+            if(f.servingSize && f.servingSizeUnit) bits.push(`${f.servingSize}${f.servingSizeUnit} serving`);
+            return `<div class="search-result" data-idx="${i}">
+              <div style="font-weight:600;">${esc(f.description)}</div>
+              ${bits.length ? `<div class="muted" style="margin-top:2px;">${esc(bits.join(' · '))}</div>` : ''}
+            </div>`;
+          }).join('') : '<p class="muted">No results.</p>';
           $('#usda-results').querySelectorAll('.search-result').forEach(el => el.onclick = async () => {
             const f = foods[el.dataset.idx];
             area.innerHTML = `<p class="muted">Loading serving details for ${esc(f.description)}…</p>`;
@@ -662,13 +715,27 @@ async function renderFood(panel){
         }catch(e){ $('#usda-results').innerHTML = '<p class="auth-error">Search failed.</p>'; }
       };
     } else if(mode==='scan'){
-      area.innerHTML = `<div id="reader"></div><p class="muted" style="text-align:center;">Point your camera at a barcode.</p>`;
+      area.innerHTML = `
+        <div id="reader"></div>
+        <p class="muted" style="text-align:center;">Fill the box with the barcode, hold steady, good lighting helps a lot.</p>
+        <div class="field" style="margin-top:16px;">
+          <label>Camera not catching it? Type the barcode number instead</label>
+          <div class="qty-row" style="max-width:none;">
+            <input type="text" id="manual-barcode" inputmode="numeric" placeholder="e.g. 049000028911" style="flex:1;">
+            <button class="btn btn-ghost" id="manual-barcode-lookup" style="padding:9px 16px;">Look up</button>
+          </div>
+        </div>
+      `;
+      $('#manual-barcode-lookup').onclick = () => {
+        const code = $('#manual-barcode').value.trim();
+        if(code) lookupBarcode(code, area);
+      };
       if(!window.isSecureContext){
-        area.innerHTML = `<p class="auth-error">Camera access needs a secure (https) connection. If you opened this through the GitHub Pages link that's fine — this only shows if you're on plain http.</p>`;
+        area.innerHTML += `<p class="auth-error">Camera access needs a secure (https) connection.</p>`;
         return;
       }
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-        area.innerHTML = `<p class="auth-error">This browser doesn't support camera access. Try Chrome or Safari, or use manual entry / search instead.</p>`;
+        area.innerHTML += `<p class="auth-error">This browser doesn't support camera access — the manual entry above will still work.</p>`;
         return;
       }
       const qr = new Html5Qrcode('reader', { formatsToSupport: [
@@ -678,37 +745,51 @@ async function renderFood(panel){
         Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.QR_CODE
       ], verbose: false });
       let scanned = false;
-      qr.start({facingMode:'environment'}, {fps:10, qrbox:{width:260,height:130}}, async (decoded) => {
-        if(scanned) return;
-        scanned = true;
-        qr.stop().catch(()=>{});
-        area.innerHTML = `<p class="muted">Found code ${esc(decoded)} — looking up product…</p>`;
-        try{
-          const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${decoded}.json`);
-          const data = await res.json();
-          if(data.status !== 1){ area.innerHTML = `<p class="auth-error">Code ${esc(decoded)} scanned, but no product found in Open Food Facts. Try manual entry.</p>`; return; }
-          const p = data.product;
-          const n = p.nutriments || {};
-          pendingFood = {
-            food_name: p.product_name || 'Scanned item',
-            calories: n['energy-kcal_100g'] || n['energy-kcal_serving'] || 0,
-            protein: n['proteins_100g'] || n['proteins_serving'] || 0,
-            carbs: n['carbohydrates_100g'] || n['carbohydrates_serving'] || 0,
-            fat: n['fat_100g'] || n['fat_serving'] || 0,
-            source: 'barcode',
-            barcode: decoded,
-            ingredients_raw: p.ingredients_text || '',
-            servingLabel: 'per 100g (package label)'
-          };
-          area.innerHTML = manualFormHtml(pendingFood);
-          wireManualForm();
-        }catch(e){ area.innerHTML = `<p class="auth-error">Lookup failed — check your connection and try again.</p>`; }
-      }, ()=>{ /* fires continuously while no code is found yet — expected, not an error */ }).catch((err)=>{
+      qr.start(
+        { facingMode: 'environment' },
+        {
+          fps: 12,
+          qrbox: { width: 300, height: 160 },
+          aspectRatio: 1.6,
+          videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] }
+        },
+        async (decoded) => {
+          if(scanned) return;
+          scanned = true;
+          qr.stop().catch(()=>{});
+          await lookupBarcode(decoded, area);
+        },
+        ()=>{ /* fires continuously while no code is found yet — expected, not an error */ }
+      ).catch((err)=>{
         const msg = (err && err.toString) ? err.toString() : 'Unknown error';
-        area.innerHTML = `<p class="auth-error">Camera couldn't start: ${esc(msg)}</p>
-          <p class="muted">Most likely fix: tap the padlock/site-info icon next to the address bar → Site settings → Camera → Allow. Then reload this page. If you're viewing this inside a Claude conversation instead of the GitHub Pages link, camera access won't work there — open your github.io link directly.</p>`;
+        area.innerHTML += `<p class="auth-error">Camera couldn't start: ${esc(msg)}</p>
+          <p class="muted">Most likely fix: tap the padlock/site-info icon next to the address bar → Site settings → Camera → Allow, then reload. The manual entry above will still work either way.</p>`;
       });
     }
+  }
+
+  async function lookupBarcode(decoded, area){
+    area.innerHTML = `<p class="muted">Found code ${esc(decoded)} — looking up product…</p>`;
+    try{
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${decoded}.json`);
+      const data = await res.json();
+      if(data.status !== 1){ area.innerHTML = `<p class="auth-error">Code ${esc(decoded)} scanned, but no product found in Open Food Facts. Try manual entry instead.</p>`; return; }
+      const p = data.product;
+      const n = p.nutriments || {};
+      pendingFood = {
+        food_name: p.product_name || 'Scanned item',
+        calories: n['energy-kcal_100g'] || n['energy-kcal_serving'] || 0,
+        protein: n['proteins_100g'] || n['proteins_serving'] || 0,
+        carbs: n['carbohydrates_100g'] || n['carbohydrates_serving'] || 0,
+        fat: n['fat_100g'] || n['fat_serving'] || 0,
+        source: 'barcode',
+        barcode: decoded,
+        ingredients_raw: p.ingredients_text || '',
+        servingLabel: 'per 100g (package label)'
+      };
+      area.innerHTML = manualFormHtml(pendingFood);
+      wireManualForm();
+    }catch(e){ area.innerHTML = `<p class="auth-error">Lookup failed — check your connection and try again.</p>`; }
   }
 
   function manualFormHtml(prefill={}){
@@ -763,7 +844,7 @@ async function renderFood(panel){
     $('#save-food').onclick = async () => {
       const qty = parseFloat($('#f-qty')?.value) || 1;
       const body = {
-        user_id: uid, date: todayStr(),
+        user_id: uid, date: foodSelectedDate,
         meal: $('#f-meal').value,
         food_name: $('#f-name').value.trim() || 'Untitled food',
         calories: (parseFloat($('#f-cal').value)||0) * qty,
@@ -780,7 +861,7 @@ async function renderFood(panel){
     };
   }
 }
-function macroDonut(totals){
+function macroDonut(totals, profile){
   const pCal = totals.p*4, cCal = totals.c*4, fCal = totals.f*9;
   const macroSum = pCal + cCal + fCal;
   if(macroSum <= 0 && totals.cal <= 0) return `<p class="empty-state">Log some food to see your macro split.</p>`;
@@ -797,6 +878,29 @@ function macroDonut(totals){
     return seg;
   }).join('');
   const mismatch = Math.abs(totals.cal - macroSum) > 25;
+
+  const tol = (profile?.macro_tolerance_pct ?? 10) / 100;
+  function statusFor(actual, target){
+    if(target == null || target === '') return null;
+    const low = target * (1 - tol), high = target * (1 + tol);
+    if(actual < low) return {ok:false, dir:'under', color:'#C9A63B'};
+    if(actual > high) return {ok:false, dir:'over', color:'var(--rust)'};
+    return {ok:true, dir:'on target', color:'var(--sage-600)'};
+  }
+  const targets = [
+    ['Calories', totals.cal, profile?.target_calories],
+    ['Protein', totals.p, profile?.target_protein],
+    ['Carbs', totals.c, profile?.target_carbs],
+    ['Fat', totals.f, profile?.target_fat],
+  ];
+  const hasAnyTarget = targets.some(t => t[2] != null && t[2] !== '');
+  const targetRows = hasAnyTarget ? targets.filter(t => t[2] != null && t[2] !== '').map(([label,actual,target]) => {
+    const s = statusFor(actual, target);
+    return `<div class="correlation-bar-row">
+      <div class="correlation-label"><span>${esc(label)} — ${Math.round(actual)} / ${Math.round(target)}${label==='Calories'?'':'g'}</span><b style="color:${s.color};">${s.dir}</b></div>
+    </div>`;
+  }).join('') : '';
+
   return `
     <div class="donut-wrap">
       <svg width="140" height="140" viewBox="0 0 140 140">${paths}<text x="70" y="74" text-anchor="middle" font-family="Fraunces,serif" font-size="16" fill="var(--ink)">${Math.round(totals.cal)} cal</text></svg>
@@ -806,6 +910,7 @@ function macroDonut(totals){
         <div class="legend-item"><span class="legend-dot" style="background:var(--rust);"></span>Fat — ${Math.round(totals.f)}g (${Math.round(fCal/macroSum*100)}%)</div>
       </div>
     </div>
+    ${hasAnyTarget ? `<div style="margin-top:16px;">${targetRows}</div>` : `<p class="muted" style="margin-top:14px;">Set macro targets in the Progress tab to see how today compares.</p>`}
     ${mismatch ? `<p class="serving-note" style="margin-top:14px;">Heads up: your macros add up to ${Math.round(macroSum)} cal, but your logged total is ${Math.round(totals.cal)} cal — likely one or more entries has calories filled in without protein/carb/fat. Edit those entries to fill in macros for a fully accurate split.</p>` : ''}`;
 }
 function foodRow(l){
@@ -901,7 +1006,41 @@ async function renderProgress(panel){
       <h2 class="section-title">Trend</h2>
       ${chartSvg}
     </div>
+    <div class="card">
+      <h2 class="section-title">Your goals</h2>
+      <div class="row">
+        <div class="field"><label>Starting weight (lbs)</label><input type="number" step="0.1" id="g-start" value="${profile.starting_weight ?? ''}"></div>
+        <div class="field"><label>Goal weight (lbs)</label><input type="number" step="0.1" id="g-goal" value="${profile.goal_weight ?? ''}"></div>
+        <div class="field"><label>Workout goal (per week)</label><input type="number" id="g-workout" value="${profile.workout_goal_per_week ?? ''}"></div>
+      </div>
+      <h2 class="section-title" style="margin-top:8px;">Macro targets</h2>
+      <p class="muted" style="margin-top:-6px;margin-bottom:10px;">Leave any of these blank if you don't want to track a target for it.</p>
+      <div class="row">
+        <div class="field"><label>Calories</label><input type="number" id="g-cal" value="${profile.target_calories ?? ''}"></div>
+        <div class="field"><label>Protein (g)</label><input type="number" id="g-p" value="${profile.target_protein ?? ''}"></div>
+        <div class="field"><label>Carbs (g)</label><input type="number" id="g-c" value="${profile.target_carbs ?? ''}"></div>
+        <div class="field"><label>Fat (g)</label><input type="number" id="g-f" value="${profile.target_fat ?? ''}"></div>
+      </div>
+      <div class="field" style="max-width:220px;"><label>Tolerance (± %)</label><input type="number" id="g-tol" value="${profile.macro_tolerance_pct ?? 10}"></div>
+      <p class="muted" style="margin-top:-4px;">e.g. 10% means hitting within 10% above or below your target counts as "on track" on your macro chart.</p>
+      <button class="btn btn-primary" id="save-goals" style="width:auto;padding:11px 26px;margin-top:6px;">Save goals</button>
+    </div>
   `;
+  $('#save-goals').onclick = async () => {
+    const body = {
+      starting_weight: parseFloat($('#g-start').value) || null,
+      goal_weight: parseFloat($('#g-goal').value) || null,
+      workout_goal_per_week: parseInt($('#g-workout').value) || null,
+      target_calories: $('#g-cal').value ? parseFloat($('#g-cal').value) : null,
+      target_protein: $('#g-p').value ? parseFloat($('#g-p').value) : null,
+      target_carbs: $('#g-c').value ? parseFloat($('#g-c').value) : null,
+      target_fat: $('#g-f').value ? parseFloat($('#g-f').value) : null,
+      macro_tolerance_pct: $('#g-tol').value ? parseFloat($('#g-tol').value) : 10,
+    };
+    await supa(`/rest/v1/profiles?id=eq.${uid}`, {method:'PATCH', body: JSON.stringify(body)});
+    await ensureProfile();
+    renderProgress(panel);
+  };
 }
 
 // ---------- JOURNAL ----------
