@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Paola's Lifestyle</title>
+<title>Rooted</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="manifest" href="manifest.json">
@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Lifestyle">
+<meta name="apple-mobile-web-app-title" content="Rooted">
 <meta name="theme-color" content="#647A5C">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
@@ -196,6 +196,14 @@
   .day-pill.on{background:var(--sage-600);color:#fff;border-color:var(--sage-600);}
   .reminder-time{width:110px;}
   .push-status{font-size:12.5px;color:var(--ink-soft);margin-top:8px;}
+  .sobriety-badge{text-align:center;padding:20px 0 8px;}
+  .sobriety-num{font-family:'Fraunces',serif;font-size:56px;color:var(--sage-700);line-height:1;}
+  .sobriety-lbl{color:var(--ink-soft);font-size:13px;margin-top:4px;}
+  .milestone-banner{background:linear-gradient(135deg,var(--gold),var(--sage-500));color:#fff;border-radius:14px;padding:14px 18px;text-align:center;margin-top:14px;font-family:'Fraunces',serif;font-size:15px;}
+  .checklist-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
+  .checklist-item:last-child{border-bottom:none;}
+  .checklist-item .checkbox{flex-shrink:0;}
+  .checklist-item .cl-text{font-size:14px;line-height:1.4;}
   .weather-hero{text-align:center;padding:10px 0 4px;}
   .weather-temp{font-family:'Fraunces',serif;font-size:52px;color:var(--sage-700);line-height:1;}
   .weather-desc{color:var(--ink-soft);font-size:14px;margin-top:4px;}
@@ -229,6 +237,19 @@ const SUPABASE_URL = 'https://gcpeomazdqtuakjnhwqo.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_y9qqZBC3b8vNQb2rFvUduw_UD1XdJ1F';
 const USDA_KEY = '5QilVVA6mgtzzUPMCpmop9eA1z6Z1miU2IXFk1xX';
 const VAPID_PUBLIC_KEY = 'BHU1AmJlG4RX6uvM1Sf3hqTdFL6snk3ZRiZzcEnCD3d38QOaoJmhuKMH60WEFcJWO_MXAzU4ANBj6o8uQ4sI5ss';
+
+async function shareText(title, text){
+  if(navigator.share){
+    try{ await navigator.share({title, text}); return; }
+    catch(e){ if(e.name==='AbortError') return; /* fall through to fallback on real errors */ }
+  }
+  try{
+    await navigator.clipboard.writeText(text);
+    alert('Copied — paste it into Messages, Mail, or wherever you\'d like to send it.');
+  }catch(e){
+    window.location.href = 'sms:?&body=' + encodeURIComponent(text);
+  }
+}
 
 function urlBase64ToUint8Array(base64String){
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -397,6 +418,8 @@ function checkForDayRollover(){
     lastKnownDate = nowDate;
     selectedDate = nowDate;
     cycleSelectedDate = nowDate;
+    if(typeof foodSelectedDate !== 'undefined') foodSelectedDate = nowDate;
+    if(typeof recoverySelectedDate !== 'undefined') recoverySelectedDate = nowDate;
     if(session){ renderPanel(); }
   }
 }
@@ -413,7 +436,7 @@ function render(){
   const root = $('#root');
   root.innerHTML = `
     <div class="app-header">
-      <div class="brand">${leafSvg('var(--sage-600)',26)}<h1>Paola's Lifestyle</h1></div>
+      <div class="brand">${leafSvg('var(--sage-600)',26)}<h1>Rooted</h1></div>
       <button class="signout" id="signout-btn">Sign out</button>
     </div>
     <div class="tabs" id="tabs"></div>
@@ -426,6 +449,7 @@ function render(){
 
 const TABS = [
   {id:'today', label:'Today'},
+  {id:'recovery', label:'Recovery'},
   {id:'food', label:'Food & Macros'},
   {id:'inflammatory', label:'Inflammatory'},
   {id:'cycle', label:'Cycle'},
@@ -446,6 +470,7 @@ async function renderPanel(){
   panel.innerHTML = `<div class="empty-state">${leafSvg('var(--sage-300)',22)}<p>Loading…</p></div>`;
   try{
     if(activeTab==='today') await renderToday(panel);
+    else if(activeTab==='recovery') await renderRecovery(panel);
     else if(activeTab==='food') await renderFood(panel);
     else if(activeTab==='inflammatory') await renderInflammatory(panel);
     else if(activeTab==='cycle') await renderCycle(panel);
@@ -464,7 +489,7 @@ function renderAuth(){
   root.innerHTML = `
   <div class="auth-wrap">
     <div class="brand" style="justify-content:center;margin-bottom:14px;">${leafSvg('var(--sage-600)',30)}</div>
-    <h1>Paola's Lifestyle</h1>
+    <h1>Rooted</h1>
     <p class="auth-sub">A quiet place to track your body, your habits, and your goals.</p>
     <div class="card">
       <div class="field"><label>Email</label><input type="email" id="auth-email" autocomplete="email"></div>
@@ -498,6 +523,196 @@ function renderAuth(){
       errEl.style.display='block';
     }
   };
+}
+
+// ---------- RECOVERY ----------
+let recoverySelectedDate = todayStr();
+const MILESTONE_DAYS = [1,30,60,90,180,365];
+function daysSober(startDate){
+  if(!startDate) return null;
+  const start = new Date(startDate+'T00:00:00');
+  const now = new Date(todayStr()+'T00:00:00');
+  return Math.floor((now-start)/86400000) + 1;
+}
+function milestoneMessage(days){
+  if(MILESTONE_DAYS.includes(days)) {
+    if(days===1) return "One day. That's the whole program some days — proud of you for starting.";
+    if(days<365) return `${days} days. That's real, hard-won progress — take a moment to notice it.`;
+    return `${Math.floor(days/365)} year${days>=730?'s':''}. Look how far you've come.`;
+  }
+  if(days>365 && days%365===0) return `${days/365} years today. Look how far you've come.`;
+  return null;
+}
+
+async function renderRecovery(panel){
+  const uid = session.user.id;
+  const startDate = profile.recovery_start_date;
+  const label = profile.recovery_label || 'Sobriety';
+  const days = daysSober(startDate);
+  const milestone = days!=null ? milestoneMessage(days) : null;
+
+  const [logs] = await Promise.all([
+    supa(`/rest/v1/recovery_logs?user_id=eq.${uid}&date=eq.${recoverySelectedDate}&select=*`)
+  ]);
+  const log = logs[0] || {};
+  const dateLabel = formatDateLabel(recoverySelectedDate);
+  const isFuture = recoverySelectedDate >= todayStr();
+
+  panel.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">${esc(label)}</h2>
+      ${days!=null ? `
+        <div class="sobriety-badge">
+          <div class="sobriety-num">${days}</div>
+          <div class="sobriety-lbl">day${days===1?'':'s'}</div>
+        </div>
+        ${milestone ? `<div class="milestone-banner">${esc(milestone)}</div>` : ''}
+      ` : `<p class="empty-state">Set your ${esc(label.toLowerCase())} date below to start your counter.</p>`}
+      <div class="row" style="margin-top:16px;">
+        <div class="field"><label>What are you tracking? (label)</label><input type="text" id="rec-label" value="${esc(label)}" placeholder="Sobriety, Recovery, etc."></div>
+        <div class="field"><label>Start date</label><input type="date" id="rec-date" value="${startDate || ''}"></div>
+      </div>
+      <button class="btn btn-ghost" id="save-recovery-date" style="width:auto;padding:9px 20px;">Save</button>
+    </div>
+
+    <div class="card">
+      <div class="date-nav">
+        <button class="date-nav-btn" id="rec-prev">‹</button>
+        <div class="date-nav-label">
+          <div class="big">${dateLabel.big}</div>
+          <div class="small">${dateLabel.small}</div>
+          ${recoverySelectedDate !== todayStr() ? `<button class="jump-today" id="rec-jump">Jump to today</button>` : ''}
+        </div>
+        <button class="date-nav-btn" id="rec-next" ${isFuture?'disabled':''}>›</button>
+      </div>
+
+      <h2 class="section-title">Upon Waking</h2>
+      <p class="muted" style="margin-top:-6px;">A quiet moment before the day starts — not a checklist to rush through.</p>
+      <div class="checklist-item">
+        <div class="checkbox ${log.morning_prayed?'done':''}" id="cl-prayed">${log.morning_prayed?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 12l6 6L20 6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>':''}</div>
+        <div class="cl-text">Took a moment to pray or meditate this morning</div>
+      </div>
+      <div class="field" style="margin-top:10px;"><label>What am I asking for guidance on today?</label><textarea id="rec-guidance" rows="2">${esc(log.morning_guidance_note||'')}</textarea></div>
+      <div class="field"><label>Today's intention</label><input type="text" id="rec-intention" value="${esc(log.morning_intention||'')}" placeholder="e.g. patience, honesty, showing up for myself"></div>
+
+      <h2 class="section-title" style="margin-top:18px;">Step 10 — When We Retire at Night</h2>
+      <p class="muted" style="margin-top:-6px;">A constructive review of the day, in the spirit of the nightly inventory.</p>
+      ${recoveryChecklistItem('step10_resentful', log.step10_resentful, 'Was I resentful today?')}
+      ${recoveryChecklistItem('step10_selfish', log.step10_selfish, 'Was I selfish today?')}
+      ${recoveryChecklistItem('step10_dishonest', log.step10_dishonest, 'Was I dishonest today?')}
+      ${recoveryChecklistItem('step10_afraid', log.step10_afraid, 'Was I afraid today?')}
+      ${recoveryChecklistItem('step10_owe_apology', log.step10_owe_apology, 'Do I owe anyone an apology?')}
+      ${recoveryChecklistItem('step10_kind', log.step10_kind, 'Was I kind and loving toward others today?')}
+      <div class="field" style="margin-top:10px;"><label>Anything I need to make right?</label><textarea id="rec-amends" rows="2">${esc(log.step10_amends_note||'')}</textarea></div>
+      <div class="field"><label>What could I do better?</label><textarea id="rec-improve" rows="2">${esc(log.step10_improve_note||'')}</textarea></div>
+
+      <button class="btn btn-primary" id="save-recovery-log" style="width:auto;padding:11px 26px;margin-top:6px;">Save today's practice</button>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Gratitude list</h2>
+      <p class="muted" style="margin-top:-6px;">Add as many as you'd like — then share the whole list with your sponsor whenever you're ready.</p>
+      <div class="qty-row" style="max-width:none;">
+        <input type="text" id="grat-input" placeholder="I'm grateful for…" style="flex:1;">
+        <button class="btn btn-ghost" id="grat-add" style="padding:9px 16px;">Add</button>
+      </div>
+      <div id="grat-list" style="margin-top:12px;"></div>
+      <div class="btn-row" style="margin-top:12px;">
+        <button class="btn btn-primary" id="grat-save" style="width:auto;padding:9px 20px;">Save list</button>
+        <button class="btn btn-ghost" id="grat-share" style="width:auto;padding:9px 20px;">Share with sponsor</button>
+      </div>
+    </div>
+  `;
+
+  $('#rec-prev').onclick = () => { recoverySelectedDate = addDays(recoverySelectedDate,-1); renderRecovery(panel); };
+  $('#rec-next').onclick = () => { if(!isFuture){ recoverySelectedDate = addDays(recoverySelectedDate,1); renderRecovery(panel); } };
+  const jumpBtn = $('#rec-jump');
+  if(jumpBtn) jumpBtn.onclick = () => { recoverySelectedDate = todayStr(); renderRecovery(panel); };
+
+  $('#save-recovery-date').onclick = async () => {
+    await supa(`/rest/v1/profiles?id=eq.${uid}`, {method:'PATCH', body: JSON.stringify({
+      recovery_start_date: $('#rec-date').value || null,
+      recovery_label: $('#rec-label').value.trim() || 'Sobriety'
+    })});
+    await ensureProfile();
+    renderRecovery(panel);
+  };
+
+  const prayedBox = $('#cl-prayed');
+  let prayedState = !!log.morning_prayed;
+  if(prayedBox) prayedBox.onclick = () => {
+    prayedState = !prayedState;
+    prayedBox.classList.toggle('done', prayedState);
+    prayedBox.innerHTML = prayedState ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 12l6 6L20 6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '';
+  };
+  const checklistState = {
+    step10_resentful: !!log.step10_resentful, step10_selfish: !!log.step10_selfish,
+    step10_dishonest: !!log.step10_dishonest, step10_afraid: !!log.step10_afraid,
+    step10_owe_apology: !!log.step10_owe_apology, step10_kind: !!log.step10_kind
+  };
+  Object.keys(checklistState).forEach(key => {
+    const box = document.getElementById('cl-'+key);
+    if(!box) return;
+    box.onclick = () => {
+      checklistState[key] = !checklistState[key];
+      box.classList.toggle('done', checklistState[key]);
+      box.innerHTML = checklistState[key] ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 12l6 6L20 6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '';
+    };
+  });
+
+  $('#save-recovery-log').onclick = async () => {
+    const body = {
+      user_id: uid, date: recoverySelectedDate,
+      morning_prayed: prayedState,
+      morning_guidance_note: $('#rec-guidance').value,
+      morning_intention: $('#rec-intention').value,
+      ...checklistState,
+      step10_amends_note: $('#rec-amends').value,
+      step10_improve_note: $('#rec-improve').value
+    };
+    await supa(`/rest/v1/recovery_logs?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify(body)});
+    renderRecovery(panel);
+  };
+
+  // ---- gratitude list ----
+  let gratitudeItems = (log.step10_gratitude_list && log.step10_gratitude_list.length) ? [...log.step10_gratitude_list] : [];
+  function renderGratitudeList(){
+    const box = $('#grat-list');
+    box.innerHTML = gratitudeItems.length
+      ? gratitudeItems.map((item,i) => `<div class="checklist-item"><div class="cl-text" style="flex:1;">${esc(item)}</div><button class="small-btn grat-remove" data-i="${i}">Remove</button></div>`).join('')
+      : `<p class="empty-state">Nothing added yet.</p>`;
+    box.querySelectorAll('.grat-remove').forEach(b => b.onclick = () => {
+      gratitudeItems.splice(parseInt(b.dataset.i),1);
+      renderGratitudeList();
+    });
+  }
+  renderGratitudeList();
+  const addGratItem = () => {
+    const input = $('#grat-input');
+    const val = input.value.trim();
+    if(!val) return;
+    gratitudeItems.push(val);
+    input.value = '';
+    renderGratitudeList();
+  };
+  $('#grat-add').onclick = addGratItem;
+  $('#grat-input').addEventListener('keydown', (e) => { if(e.key==='Enter'){ e.preventDefault(); addGratItem(); } });
+  $('#grat-save').onclick = async () => {
+    await supa(`/rest/v1/recovery_logs?on_conflict=user_id,date`, {method:'POST', headers:{Prefer:'resolution=merge-duplicates,return=representation'}, body: JSON.stringify({
+      user_id: uid, date: recoverySelectedDate, step10_gratitude_list: gratitudeItems
+    })});
+  };
+  $('#grat-share').onclick = () => {
+    if(!gratitudeItems.length){ alert('Add a few things first.'); return; }
+    const body = `Gratitude list — ${recoverySelectedDate}\n\n${gratitudeItems.map(i=>`• ${i}`).join('\n')}`;
+    shareText('Gratitude list', body);
+  };
+}
+function recoveryChecklistItem(key, checked, text){
+  return `<div class="checklist-item">
+    <div class="checkbox ${checked?'done':''}" id="cl-${key}">${checked?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 12l6 6L20 6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>':''}</div>
+    <div class="cl-text">${esc(text)}</div>
+  </div>`;
 }
 
 // ---------- TODAY ----------
@@ -1143,6 +1358,42 @@ async function renderProgress(panel){
       </div>
     </div>
     <div class="card">
+      <h2 class="section-title">Suggested calorie & macro targets</h2>
+      <p class="muted" style="margin-top:-6px;">Answer these and I'll estimate a daily calorie target and a protein/carb/fat split to go with it. This is a general estimate, not medical advice — please run it by your doctor, especially alongside your anti-inflammatory diet.</p>
+      <div class="row">
+        <div class="field"><label>Biological sex (for the calorie formula)</label>
+          <select id="s-sex">
+            <option value="" ${!profile.biological_sex?'selected':''}>Select…</option>
+            <option value="female" ${profile.biological_sex==='female'?'selected':''}>Female</option>
+            <option value="male" ${profile.biological_sex==='male'?'selected':''}>Male</option>
+          </select>
+        </div>
+        <div class="field"><label>Age</label><input type="number" id="s-age" value="${profile.age ?? ''}"></div>
+        <div class="field"><label>Height (inches)</label><input type="number" id="s-height" value="${profile.height_inches ?? ''}"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Activity level</label>
+          <select id="s-activity">
+            <option value="sedentary" ${profile.activity_level==='sedentary'?'selected':''}>Sedentary (little exercise)</option>
+            <option value="light" ${(profile.activity_level==='light'||!profile.activity_level)?'selected':''}>Light (1-3x/week)</option>
+            <option value="moderate" ${profile.activity_level==='moderate'?'selected':''}>Moderate (3-5x/week)</option>
+            <option value="active" ${profile.activity_level==='active'?'selected':''}>Active (6-7x/week)</option>
+          </select>
+        </div>
+        <div class="field"><label>Pace toward your goal weight</label>
+          <select id="s-pace">
+            <option value="0.5">Gentle — about 0.5 lb/week</option>
+            <option value="1" selected>Moderate — about 1 lb/week</option>
+            <option value="1.5">Steady — about 1.5 lb/week</option>
+            <option value="2">Faster — about 2 lb/week (upper end generally recommended)</option>
+          </select>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:-4px;">Prefer to hit a specific date instead? <button class="jump-today" id="s-date-toggle" type="button">Set a target date</button></p>
+      <div class="field" id="s-date-field" style="max-width:220px;display:none;"><label>Target date</label><input type="date" id="s-date" value="${profile.target_date || ''}"></div>
+      <div id="suggestion-box" style="margin-top:10px;"></div>
+    </div>
+    <div class="card">
       <h2 class="section-title">Trend</h2>
       ${chartSvg}
     </div>
@@ -1153,24 +1404,7 @@ async function renderProgress(panel){
         <div class="field"><label>Goal weight (lbs)</label><input type="number" step="0.1" id="g-goal" value="${profile.goal_weight ?? ''}"></div>
         <div class="field"><label>Workout goal (per week)</label><input type="number" id="g-workout" value="${profile.workout_goal_per_week ?? ''}"></div>
       </div>
-      <div class="field" style="max-width:220px;"><label>Target date (optional)</label><input type="date" id="g-date" value="${profile.target_date || ''}"></div>
       <div class="field" style="max-width:160px;"><label>Zip code (for temperature)</label><input type="text" id="g-zip" value="${esc(profile.zip_code || '78254')}"></div>
-
-      <h2 class="section-title" style="margin-top:8px;">Calorie suggestion</h2>
-      <p class="muted" style="margin-top:-6px;">Optional — add these and I'll estimate a daily calorie target to hit your goal weight by your target date. This is a rough estimate, not medical advice — please run it by your doctor, especially alongside your anti-inflammatory diet.</p>
-      <div class="row">
-        <div class="field"><label>Height (inches)</label><input type="number" id="g-height" value="${profile.height_inches ?? ''}"></div>
-        <div class="field"><label>Age</label><input type="number" id="g-age" value="${profile.age ?? ''}"></div>
-        <div class="field"><label>Activity level</label>
-          <select id="g-activity">
-            <option value="sedentary" ${profile.activity_level==='sedentary'?'selected':''}>Sedentary (little exercise)</option>
-            <option value="light" ${profile.activity_level==='light'?'selected':''}>Light (1-3x/week)</option>
-            <option value="moderate" ${profile.activity_level==='moderate'?'selected':''}>Moderate (3-5x/week)</option>
-            <option value="active" ${profile.activity_level==='active'?'selected':''}>Active (6-7x/week)</option>
-          </select>
-        </div>
-      </div>
-      <div id="calorie-suggestion-box"></div>
 
       <h2 class="section-title" style="margin-top:8px;">Macro targets</h2>
       <p class="muted" style="margin-top:-6px;margin-bottom:6px;">These are your default targets. Leave blank if you don't want to track one.</p>
@@ -1249,44 +1483,80 @@ async function renderProgress(panel){
   $('#g-cal').oninput = () => { if(macroMode==='percent') renderMacroInputs(); };
   renderMacroInputs();
 
-  // ---- calorie suggestion based on target date + TDEE estimate ----
-  function renderCalorieSuggestion(){
-    const targetDate = $('#g-date').value;
-    const heightIn = parseFloat($('#g-height').value);
-    const age = parseInt($('#g-age').value);
-    const activity = $('#g-activity').value;
-    const goalW = parseFloat($('#g-goal').value) || profile.goal_weight;
-    const box = $('#calorie-suggestion-box');
-    if(!targetDate || !goalW){ box.innerHTML = ''; return; }
-    const daysRemaining = Math.ceil((new Date(targetDate) - new Date(todayStr())) / 86400000);
-    if(daysRemaining <= 0){ box.innerHTML = `<p class="auth-error">Target date should be in the future.</p>`; return; }
+  // ---- suggested calorie + macro targets: works from pace by default, date is optional override ----
+  const dateToggleBtn = $('#s-date-toggle');
+  const dateField = $('#s-date-field');
+  if(dateToggleBtn) dateToggleBtn.onclick = () => {
+    const showing = dateField.style.display !== 'none';
+    dateField.style.display = showing ? 'none' : 'block';
+    dateToggleBtn.textContent = showing ? 'Set a target date' : 'Use pace instead';
+    renderSuggestion();
+  };
+
+  function renderSuggestion(){
+    const box = $('#suggestion-box');
+    const sex = $('#s-sex').value;
+    const age = parseInt($('#s-age').value);
+    const heightIn = parseFloat($('#s-height').value);
+    const activity = $('#s-activity').value;
+    const goalW = parseFloat($('#g-goal')?.value) || profile.goal_weight;
     const currentWeight = latest;
-    const lbsToLose = currentWeight - goalW;
-    const weeksRemaining = daysRemaining / 7;
-    const weeklyRate = lbsToLose / weeksRemaining;
-    let html = `<p class="muted">At this pace: about <b>${weeklyRate.toFixed(1)} lbs/week</b> over ${Math.round(weeksRemaining)} weeks.</p>`;
-    let warning = '';
-    if(Math.abs(weeklyRate) > 2) warning += "That's faster than the commonly recommended max of ~2 lbs/week — a later target date would be gentler. ";
-    if(heightIn && age){
-      const weightKg = currentWeight * 0.4536, heightCm = heightIn * 2.54;
-      const bmr = 10*weightKg + 6.25*heightCm - 5*age - 161;
-      const activityMap = {sedentary:1.2, light:1.375, moderate:1.55, active:1.725};
-      const maintenance = bmr * (activityMap[activity]||1.2);
-      const dailyDeficit = (lbsToLose*3500) / daysRemaining;
-      let suggestedCal = Math.round(maintenance - dailyDeficit);
-      if(suggestedCal < 1200){ warning += "This pace would put you under 1200 cal/day, generally considered too low without medical supervision — please check with your doctor before going this low. "; }
-      html += `<p class="muted">Estimated maintenance: <b>${Math.round(maintenance)} cal/day</b>. Suggested target: <b>${suggestedCal} cal/day</b>.</p>`;
-      if(warning) html += `<p class="serving-note">${esc(warning)}</p>`;
-      html += `<button class="btn-ghost" id="use-suggested-cal" style="padding:6px 14px;font-size:12px;">Use ${suggestedCal} as my calorie target</button>`;
-    } else {
-      html += `<p class="muted">Add height and age above for a personalized calorie estimate.</p>`;
+    if(!sex || !age || !heightIn || !goalW){
+      box.innerHTML = `<p class="muted">Select your sex, age, and height above for an estimate.</p>`;
+      return;
     }
+    const usingDate = dateField.style.display !== 'none';
+    const targetDate = usingDate ? $('#s-date').value : '';
+    const lbsToLose = currentWeight - goalW;
+    let weeklyRate, daysRemaining;
+    if(usingDate && targetDate){
+      daysRemaining = Math.ceil((new Date(targetDate) - new Date(todayStr())) / 86400000);
+      if(daysRemaining <= 0){ box.innerHTML = `<p class="auth-error">Target date should be in the future.</p>`; return; }
+      weeklyRate = lbsToLose / (daysRemaining/7);
+    } else {
+      weeklyRate = parseFloat($('#s-pace').value) || 1;
+      weeklyRate = lbsToLose >= 0 ? weeklyRate : -weeklyRate;
+      daysRemaining = Math.abs(lbsToLose) > 0 ? Math.ceil((lbsToLose/weeklyRate)*7) : 0;
+    }
+    let warning = '';
+    if(Math.abs(weeklyRate) > 2) warning += "That pace is faster than the commonly recommended max of ~2 lbs/week. ";
+
+    const weightKg = currentWeight * 0.4536, heightCm = heightIn * 2.54;
+    const bmr = sex === 'male'
+      ? 10*weightKg + 6.25*heightCm - 5*age + 5
+      : 10*weightKg + 6.25*heightCm - 5*age - 161;
+    const activityMap = {sedentary:1.2, light:1.375, moderate:1.55, active:1.725};
+    const maintenance = bmr * (activityMap[activity]||1.2);
+    const dailyDeficit = (weeklyRate*3500) / 7;
+    let suggestedCal = Math.round(maintenance - dailyDeficit);
+    if(suggestedCal < 1200){ warning += "This pace would put you under 1200 cal/day, generally considered too low without medical supervision — consider a gentler pace or checking with your doctor. "; }
+
+    // weight-based protein target: ~0.8g per lb of goal weight, a common range for preserving lean mass during weight loss
+    const proteinG = Math.round(goalW * 0.8);
+    const fatCal = suggestedCal * 0.30;
+    const fatG = Math.round(fatCal / 9);
+    const proteinCal = proteinG * 4;
+    const carbG = Math.max(0, Math.round((suggestedCal - proteinCal - fatCal) / 4));
+
+    let html = `<p class="muted">At this pace: about <b>${Math.abs(weeklyRate).toFixed(1)} lbs/week</b>${daysRemaining ? ` (~${Math.round(daysRemaining/7)} weeks to goal)` : ''}.</p>`;
+    html += `<p class="muted">Estimated maintenance: <b>${Math.round(maintenance)} cal/day</b>. Suggested target: <b>${suggestedCal} cal/day</b>.</p>`;
+    html += `<p class="muted">Suggested macros at that calorie level: <b>${proteinG}g protein · ${carbG}g carbs · ${fatG}g fat</b> — protein is set from your goal weight to help preserve muscle while losing; carbs and fat split the rest.</p>`;
+    if(warning) html += `<p class="serving-note">${esc(warning)}</p>`;
+    html += `<div class="btn-row"><button class="btn-ghost" id="use-suggested-cal" style="padding:6px 14px;font-size:12px;">Use ${suggestedCal} cal + this macro split</button></div>`;
     box.innerHTML = html;
+
     const useBtn = $('#use-suggested-cal');
-    if(useBtn) useBtn.onclick = () => { $('#g-cal').value = useBtn.textContent.match(/\d+/)[0]; if(macroMode==='percent') renderMacroInputs(); };
+    if(useBtn) useBtn.onclick = () => {
+      $('#g-cal').value = suggestedCal;
+      macroMode = 'grams';
+      renderMacroInputs();
+      $('#g-p').value = proteinG;
+      $('#g-c').value = carbG;
+      $('#g-f').value = fatG;
+    };
   }
-  ['#g-date','#g-height','#g-age','#g-activity','#g-goal'].forEach(sel => $(sel).addEventListener('input', renderCalorieSuggestion));
-  renderCalorieSuggestion();
+  ['#s-sex','#s-age','#s-height','#s-activity','#s-pace','#s-date'].forEach(sel => { const el = $(sel); if(el) el.addEventListener('input', renderSuggestion); });
+  renderSuggestion();
 
   $('#save-goals').onclick = async () => {
     const cal = $('#g-cal').value ? parseFloat($('#g-cal').value) : null;
@@ -1294,10 +1564,11 @@ async function renderProgress(panel){
       starting_weight: parseFloat($('#g-start').value) || null,
       goal_weight: parseFloat($('#g-goal').value) || null,
       workout_goal_per_week: parseInt($('#g-workout').value) || null,
-      target_date: $('#g-date').value || null,
-      height_inches: $('#g-height').value ? parseFloat($('#g-height').value) : null,
-      age: $('#g-age').value ? parseInt($('#g-age').value) : null,
-      activity_level: $('#g-activity').value,
+      target_date: $('#s-date').value || null,
+      height_inches: $('#s-height').value ? parseFloat($('#s-height').value) : null,
+      age: $('#s-age').value ? parseInt($('#s-age').value) : null,
+      activity_level: $('#s-activity').value,
+      biological_sex: $('#s-sex').value || null,
       target_calories: cal,
       macro_tolerance_pct: $('#g-tol').value ? parseFloat($('#g-tol').value) : 10,
       zip_code: $('#g-zip').value.trim() || '78254',
@@ -1383,10 +1654,22 @@ async function renderJournal(panel){
       $('#journal-results').innerHTML = filtered.length ? filtered.map(journalEntry).join('') : `<p class="empty-state">No entries match.</p>`;
     };
   }
+  $('#journal-results').addEventListener('click', (evt) => {
+    const btn = evt.target.closest('.share-journal-btn');
+    if(!btn) return;
+    const entry = withText.find(e => e.date === btn.dataset.date);
+    if(entry) shareText('Journal entry', `${entry.date}\n\n${entry.notes}`);
+  });
 }
 function journalEntry(e){
   const stamp = e.created_at ? new Date(e.created_at).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : e.date;
-  return `<div class="journal-entry"><div class="journal-date">${stamp}</div><div class="journal-text">${esc(e.notes)}</div></div>`;
+  return `<div class="journal-entry">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="journal-date">${stamp}</div>
+      <button class="small-btn share-journal-btn" data-date="${e.date}" style="color:var(--sage-600);">Share</button>
+    </div>
+    <div class="journal-text">${esc(e.notes)}</div>
+  </div>`;
 }
 
 // ---------- WEATHER & AIR ----------
@@ -1854,12 +2137,19 @@ async function renderScripture(panel){
         <p class="scripture-text">"${esc(text)}"</p>
         <p class="scripture-ref">${esc(ref)}</p>
         ${declaration ? `<p class="declaration">${esc(declaration)}</p>` : ''}
-        <button class="refresh-verse" id="shuffle-verse">Show me another</button>
+        <div class="btn-row" style="justify-content:center;margin-top:16px;">
+          <button class="refresh-verse" id="shuffle-verse">Show me another</button>
+          <button class="refresh-verse" id="share-verse">Share</button>
+        </div>
       </div>
     `;
     $('#shuffle-verse').onclick = () => {
       const other = list[Math.floor(Math.random()*list.length)];
       showVerse(other, list);
+    };
+    $('#share-verse').onclick = () => {
+      const shareBody = `"${text}"\n— ${ref}${declaration ? `\n\n${declaration}` : ''}`;
+      shareText('Today\'s verse', shareBody);
     };
   }
 }
