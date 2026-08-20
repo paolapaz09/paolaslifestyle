@@ -292,7 +292,13 @@ let activeTab = 'today';
 let authMode = 'signin';
 let flagsCache = null;
 
-const todayStr = () => new Date().toISOString().slice(0,10);
+const todayStr = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+};
 const $ = sel => document.querySelector(sel);
 const esc = s => (s||'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -381,6 +387,23 @@ async function init(){
   render();
 }
 
+// If the day has rolled over while the app sat in the background (common with
+// installed iOS/Android apps that get suspended, not reloaded), catch up the
+// moment the app becomes visible/focused again instead of showing stale data.
+let lastKnownDate = todayStr();
+function checkForDayRollover(){
+  const nowDate = todayStr();
+  if(nowDate !== lastKnownDate){
+    lastKnownDate = nowDate;
+    selectedDate = nowDate;
+    cycleSelectedDate = nowDate;
+    if(session){ renderPanel(); }
+  }
+}
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') checkForDayRollover(); });
+window.addEventListener('focus', checkForDayRollover);
+window.addEventListener('pageshow', checkForDayRollover);
+
 function renderLoading(){
   $('#root').innerHTML = `<div style="text-align:center;padding:100px 20px;color:var(--ink-soft);">${leafSvg('var(--sage-400)',30)}<p>Loading…</p></div>`;
 }
@@ -406,7 +429,6 @@ const TABS = [
   {id:'food', label:'Food & Macros'},
   {id:'inflammatory', label:'Inflammatory'},
   {id:'cycle', label:'Cycle'},
-  {id:'weather', label:'Weather & Air'},
   {id:'progress', label:'Progress'},
   {id:'habits', label:'Habits'},
   {id:'journal', label:'Journal'},
@@ -427,7 +449,6 @@ async function renderPanel(){
     else if(activeTab==='food') await renderFood(panel);
     else if(activeTab==='inflammatory') await renderInflammatory(panel);
     else if(activeTab==='cycle') await renderCycle(panel);
-    else if(activeTab==='weather') await renderWeather(panel);
     else if(activeTab==='progress') await renderProgress(panel);
     else if(activeTab==='habits') await renderHabits(panel);
     else if(activeTab==='journal') await renderJournal(panel);
@@ -847,6 +868,12 @@ async function renderFood(panel){
         <label>How many servings did you have?</label>
         <div class="qty-row"><input type="number" id="f-qty" value="1" step="0.25" min="0.1"><span class="muted">× the serving above</span></div>
       </div>
+      <div class="field">
+        <label>Does this have any of these? (tag it yourself — helpful when there's no ingredient list to auto-scan)</label>
+        <div class="tag-choice" id="manual-flag-choice">
+          ${['seed oil','added sugar','refined grain','processed meat','additive'].map(cat => `<button type="button" data-cat="${cat}" class="${(prefill.manual_flags||[]).includes(cat)?'active':''}">${cat}</button>`).join('')}
+        </div>
+      </div>
       <button class="btn btn-primary" id="save-food" style="width:auto;padding:11px 26px;">Add to today's log</button>
     `;
   }
@@ -862,6 +889,15 @@ async function renderFood(panel){
         $('#f-f').value = Math.round(pendingFood.base100.fat*mult);
       };
     }
+    const selectedManualFlags = new Set((pendingFood?.manual_flags)||[]);
+    const flagChoice = $('#manual-flag-choice');
+    if(flagChoice){
+      flagChoice.querySelectorAll('button').forEach(b => b.onclick = () => {
+        const cat = b.dataset.cat;
+        if(selectedManualFlags.has(cat)){ selectedManualFlags.delete(cat); b.classList.remove('active'); }
+        else { selectedManualFlags.add(cat); b.classList.add('active'); }
+      });
+    }
     $('#save-food').onclick = async () => {
       const qty = parseFloat($('#f-qty')?.value) || 1;
       const body = {
@@ -874,7 +910,8 @@ async function renderFood(panel){
         fat: (parseFloat($('#f-f').value)||0) * qty,
         source: (pendingFood && pendingFood.source) || 'manual',
         barcode: pendingFood?.barcode || null,
-        ingredients_raw: pendingFood?.ingredients_raw || null
+        ingredients_raw: pendingFood?.ingredients_raw || null,
+        manual_flags: Array.from(selectedManualFlags)
       };
       await supa('/rest/v1/food_logs', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(body)});
       pendingFood = null;
@@ -1024,10 +1061,19 @@ async function renderInflammatory(panel){
   const flaggedItems = [];
   logs.forEach(l => {
     const text = `${l.food_name||''} ${l.ingredients_raw||''}`.toLowerCase();
+    const matchedCats = new Set();
     flagsCache.forEach(f => {
-      if(text.includes(f.keyword.toLowerCase())){
+      if(text.includes(f.keyword.toLowerCase()) && !matchedCats.has(f.category)){
+        matchedCats.add(f.category);
         catCounts[f.category] = (catCounts[f.category]||0) + 1;
         flaggedItems.push({food: l.food_name, category: f.category, date: l.date});
+      }
+    });
+    (l.manual_flags||[]).forEach(cat => {
+      if(!matchedCats.has(cat)){
+        matchedCats.add(cat);
+        catCounts[cat] = (catCounts[cat]||0) + 1;
+        flaggedItems.push({food: l.food_name, category: cat, date: l.date});
       }
     });
   });
@@ -1036,7 +1082,7 @@ async function renderInflammatory(panel){
   panel.innerHTML = `
     <div class="card">
       <h2 class="section-title">This week's inflammatory load</h2>
-      <p class="muted">Checks both the food name you logged and any ingredient text (from barcode scans) against a list of seed oils, added sugars, refined grains, processed meats, and additives. So "mayo" or "chocolate cake" gets flagged from the name alone — barcode scans go further and check the full ingredient list too.</p>
+      <p class="muted">Checks the food name and any ingredient text (from barcode scans) against a keyword list, plus any categories you tag yourself when adding a food — that's the best way to make sure manual entries get counted too.</p>
       ${Object.keys(catCounts).length ? Object.entries(catCounts).map(([cat,count]) => `
         <div class="flag-cat">
           <div style="width:130px;font-size:13px;text-transform:capitalize;">${esc(cat)}</div>
@@ -1082,7 +1128,10 @@ async function renderProgress(panel){
 
   panel.innerHTML = `
     <div class="card">
-      <h2 class="section-title">Weight progress</h2>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <h2 class="section-title">Weight progress</h2>
+        <div id="temp-chip" class="muted" style="font-size:12.5px;text-align:right;">…</div>
+      </div>
       <div class="weight-now">${latest} lbs</div>
       <div class="weight-goal">Goal: ${goal} lbs &nbsp;·&nbsp; Started at ${start} lbs</div>
       <div class="stem-wrap">
@@ -1105,6 +1154,7 @@ async function renderProgress(panel){
         <div class="field"><label>Workout goal (per week)</label><input type="number" id="g-workout" value="${profile.workout_goal_per_week ?? ''}"></div>
       </div>
       <div class="field" style="max-width:220px;"><label>Target date (optional)</label><input type="date" id="g-date" value="${profile.target_date || ''}"></div>
+      <div class="field" style="max-width:160px;"><label>Zip code (for temperature)</label><input type="text" id="g-zip" value="${esc(profile.zip_code || '78254')}"></div>
 
       <h2 class="section-title" style="margin-top:8px;">Calorie suggestion</h2>
       <p class="muted" style="margin-top:-6px;">Optional — add these and I'll estimate a daily calorie target to hit your goal weight by your target date. This is a rough estimate, not medical advice — please run it by your doctor, especially alongside your anti-inflammatory diet.</p>
@@ -1250,6 +1300,7 @@ async function renderProgress(panel){
       activity_level: $('#g-activity').value,
       target_calories: cal,
       macro_tolerance_pct: $('#g-tol').value ? parseFloat($('#g-tol').value) : 10,
+      zip_code: $('#g-zip').value.trim() || '78254',
     };
     if(macroMode === 'grams'){
       body.target_protein = $('#g-p').value ? parseFloat($('#g-p').value) : null;
@@ -1292,6 +1343,24 @@ async function renderProgress(panel){
     await supa(`/rest/v1/macro_presets?id=eq.${b.dataset.id}`, {method:'DELETE'});
     renderProgress(panel);
   });
+
+  loadTempChip(profile.zip_code || '78254');
+}
+
+async function loadTempChip(zip){
+  const chip = document.getElementById('temp-chip');
+  if(!chip) return;
+  try{
+    const geoRes = await fetch(`https://api.zippopotam.us/us/${encodeURIComponent(zip)}`);
+    if(!geoRes.ok){ chip.textContent = ''; return; }
+    const geo = await geoRes.json();
+    const place = geo.places[0];
+    const wRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto`);
+    const w = await wRes.json();
+    const icons = {0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'❄️',80:'🌦️',81:'🌦️',82:'⛈️',95:'⛈️',96:'⛈️',99:'⛈️'};
+    const icon = icons[w.current?.weather_code] || '🌡️';
+    chip.textContent = `${icon} ${Math.round(w.current.temperature_2m)}° ${place['place name']}`;
+  }catch(e){ chip.textContent = ''; }
 }
 
 // ---------- JOURNAL ----------
@@ -1599,6 +1668,7 @@ async function renderCorrelation(cycleLogs){
     const text = `${l.food_name||''} ${l.ingredients_raw||''}`.toLowerCase();
     let count = 0;
     flagsCache.forEach(f => { if(text.includes(f.keyword.toLowerCase())) count++; });
+    count += (l.manual_flags||[]).length;
     flagCountByDate[l.date] = (flagCountByDate[l.date]||0) + count;
   });
 
