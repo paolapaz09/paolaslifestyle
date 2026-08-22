@@ -326,11 +326,26 @@ const esc = s => (s||'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'
 const leafSvg = (color='var(--sage-500)', size=18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M4 20C4 10 10 4 20 4C20 14 14 20 4 20Z" stroke="${color}" stroke-width="1.6"/><path d="M4 20C8 16 12 12 20 4" stroke="${color}" stroke-width="1.2"/></svg>`;
 
 // ---------- Supabase REST helpers ----------
-async function supa(path, opts={}){
+async function supa(path, opts={}, isRetry=false){
   const headers = {'apikey': SUPABASE_KEY, 'Content-Type':'application/json', ...(opts.headers||{})};
   if(session?.access_token) headers['Authorization'] = 'Bearer ' + session.access_token;
   const res = await fetch(SUPABASE_URL + path, {...opts, headers});
-  if(!res.ok){ const t = await res.text(); throw new Error(t); }
+  if(!res.ok){
+    const t = await res.text();
+    const isExpired = res.status === 401 || t.includes('PGRST303') || t.includes('JWT expired');
+    if(isExpired && !isRetry && session?.refresh_token){
+      const fresh = await refreshSession(session.refresh_token);
+      if(fresh && fresh.access_token){
+        session = fresh;
+        try{ await storageSet('session', JSON.stringify({refresh_token: fresh.refresh_token})); }catch(e){}
+        return supa(path, opts, true);
+      } else {
+        await signOut();
+        throw new Error('Your session expired — please sign in again.');
+      }
+    }
+    throw new Error(t);
+  }
   if(res.status === 204) return null;
   const txt = await res.text();
   return txt ? JSON.parse(txt) : null;
@@ -370,9 +385,27 @@ async function storageDelete(key){
   try{ localStorage.removeItem(key); }catch(e){}
 }
 
+let refreshTimer = null;
+function scheduleTokenRefresh(){
+  if(refreshTimer) clearTimeout(refreshTimer);
+  if(!session?.expires_in) return;
+  // refresh 5 minutes before actual expiry, floor of 30 seconds
+  const delayMs = Math.max((session.expires_in - 300) * 1000, 30000);
+  refreshTimer = setTimeout(async () => {
+    if(!session?.refresh_token) return;
+    const fresh = await refreshSession(session.refresh_token);
+    if(fresh && fresh.access_token){
+      session = fresh;
+      try{ await storageSet('session', JSON.stringify({refresh_token: fresh.refresh_token})); }catch(e){}
+      scheduleTokenRefresh();
+    }
+  }, delayMs);
+}
+
 async function saveSession(s){
   session = s;
   try{ await storageSet('session', JSON.stringify({refresh_token: s.refresh_token})); }catch(e){}
+  scheduleTokenRefresh();
 }
 async function loadSession(){
   try{
@@ -380,12 +413,13 @@ async function loadSession(){
     if(raw){
       const {refresh_token} = JSON.parse(raw);
       const fresh = await refreshSession(refresh_token);
-      if(fresh && fresh.access_token){ session = fresh; return true; }
+      if(fresh && fresh.access_token){ session = fresh; scheduleTokenRefresh(); return true; }
     }
   }catch(e){}
   return false;
 }
 async function signOut(){
+  if(refreshTimer) clearTimeout(refreshTimer);
   try{ await storageDelete('session'); }catch(e){}
   session = null; profile = null;
   render();
@@ -423,9 +457,20 @@ function checkForDayRollover(){
     if(session){ renderPanel(); }
   }
 }
-document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') checkForDayRollover(); });
-window.addEventListener('focus', checkForDayRollover);
-window.addEventListener('pageshow', checkForDayRollover);
+async function refreshOnResume(){
+  // iOS/Android suspend JS timers while backgrounded, so the scheduled refresh
+  // may never have fired — force a fresh token the moment the app is reopened.
+  if(!session?.refresh_token) return;
+  const fresh = await refreshSession(session.refresh_token);
+  if(fresh && fresh.access_token){
+    session = fresh;
+    try{ await storageSet('session', JSON.stringify({refresh_token: fresh.refresh_token})); }catch(e){}
+    scheduleTokenRefresh();
+  }
+}
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible'){ refreshOnResume(); checkForDayRollover(); } });
+window.addEventListener('focus', () => { refreshOnResume(); checkForDayRollover(); });
+window.addEventListener('pageshow', () => { refreshOnResume(); checkForDayRollover(); });
 
 function renderLoading(){
   $('#root').innerHTML = `<div style="text-align:center;padding:100px 20px;color:var(--ink-soft);">${leafSvg('var(--sage-400)',30)}<p>Loading…</p></div>`;
@@ -456,7 +501,7 @@ const TABS = [
   {id:'progress', label:'Progress'},
   {id:'habits', label:'Habits'},
   {id:'journal', label:'Journal'},
-  {id:'scripture', label:'Scripture'},
+  {id:'scripture', label:'Reflections'},
 ];
 
 function renderTabs(){
@@ -2151,6 +2196,16 @@ async function renderScripture(panel){
       const shareBody = `"${text}"\n— ${ref}${declaration ? `\n\n${declaration}` : ''}`;
       shareText('Today\'s verse', shareBody);
     };
+
+    const aaCard = document.createElement('div');
+    aaCard.className = 'card';
+    aaCard.innerHTML = `
+      <h2 class="section-title">Today's A.A. Reflection</h2>
+      <p class="muted">A.A. publishes a new reflection from their <i>Daily Reflections</i> book every day — I can't copy their text in here (it's copyrighted), but one tap takes you straight to today's.</p>
+      <button class="btn btn-ghost" id="open-aa-reflection" style="width:auto;padding:9px 20px;margin-top:6px;">Open today's reflection on aa.org →</button>
+    `;
+    panel.appendChild(aaCard);
+    $('#open-aa-reflection').onclick = () => window.open('https://www.aa.org/daily-reflections', '_blank');
   }
 }
 
