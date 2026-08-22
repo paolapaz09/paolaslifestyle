@@ -1012,10 +1012,7 @@ async function renderFood(panel){
         const includeBranded = $('#usda-branded').checked;
         $('#usda-results').innerHTML = '<p class="muted">Searching…</p>';
         try{
-          const dataTypeParam = includeBranded
-            ? ''
-            : ['Foundation','SR Legacy','Survey (FNDDS)'].map(dt => `&dataType=${encodeURIComponent(dt)}`).join('');
-          const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&query=${encodeURIComponent(q)}&pageSize=10${dataTypeParam}`);
+          const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&query=${encodeURIComponent(q)}&pageSize=25`);
           const rawText = await res.text();
           if(!res.ok){
             let reason = rawText;
@@ -1024,7 +1021,12 @@ async function renderFood(panel){
             return;
           }
           const data = JSON.parse(rawText);
-          const foods = data.foods || [];
+          let foods = data.foods || [];
+          if(!includeBranded){
+            const filtered = foods.filter(f => f.dataType !== 'Branded');
+            foods = filtered.length ? filtered : foods; // fall back to all results rather than showing nothing
+          }
+          foods = foods.slice(0, 8);
           $('#usda-results').innerHTML = foods.length ? foods.map((f,i)=>{
             const bits = [];
             if(f.dataType) bits.push(f.dataType === 'Branded' ? 'Packaged product' : 'Whole food');
