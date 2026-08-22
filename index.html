@@ -1014,9 +1014,16 @@ async function renderFood(panel){
         try{
           const dataTypeParam = includeBranded
             ? ''
-            : `&dataType=${encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS)')}`;
+            : ['Foundation','SR Legacy','Survey (FNDDS)'].map(dt => `&dataType=${encodeURIComponent(dt)}`).join('');
           const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&query=${encodeURIComponent(q)}&pageSize=10${dataTypeParam}`);
-          const data = await res.json();
+          const rawText = await res.text();
+          if(!res.ok){
+            let reason = rawText;
+            try{ reason = JSON.parse(rawText).error?.message || rawText; }catch(e){}
+            $('#usda-results').innerHTML = `<p class="auth-error">Search failed (${res.status}): ${esc(reason.slice(0,200))}</p>`;
+            return;
+          }
+          const data = JSON.parse(rawText);
           const foods = data.foods || [];
           $('#usda-results').innerHTML = foods.length ? foods.map((f,i)=>{
             const bits = [];
@@ -1064,7 +1071,7 @@ async function renderFood(panel){
             area.innerHTML = manualFormHtml(pendingFood);
             wireManualForm();
           });
-        }catch(e){ $('#usda-results').innerHTML = '<p class="auth-error">Search failed.</p>'; }
+        }catch(e){ $('#usda-results').innerHTML = `<p class="auth-error">Search failed: ${esc(e.message || 'unknown error')}</p>`; }
       };
     } else if(mode==='scan'){
       area.innerHTML = `
