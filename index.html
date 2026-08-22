@@ -891,6 +891,7 @@ async function renderFood(panel){
       <h2 class="section-title">Add food</h2>
       <div class="btn-row" style="margin-bottom:14px;">
         <button class="add-toggle" id="mode-search">Search database</button>
+        <button class="add-toggle" id="mode-myfoods">My Foods</button>
         <button class="add-toggle" id="mode-scan">Scan barcode</button>
         <button class="add-toggle" id="mode-manual">Manual entry</button>
       </div>
@@ -941,9 +942,10 @@ async function renderFood(panel){
   });
   if(dayCompleted) return;
   function setActiveToggle(mode){
-    ['search','scan','manual'].forEach(m => $('#mode-'+m).classList.toggle('active', m===mode));
+    ['search','myfoods','scan','manual'].forEach(m => $('#mode-'+m).classList.toggle('active', m===mode));
   }
   $('#mode-search').onclick = () => { setActiveToggle('search'); renderManualArea('search'); };
+  $('#mode-myfoods').onclick = () => { setActiveToggle('myfoods'); renderManualArea('myfoods'); };
   $('#mode-scan').onclick = () => { setActiveToggle('scan'); renderManualArea('scan'); };
   $('#mode-manual').onclick = () => { setActiveToggle('manual'); renderManualArea('manual'); };
   setActiveToggle('search');
@@ -954,23 +956,71 @@ async function renderFood(panel){
     if(mode==='manual'){
       area.innerHTML = manualFormHtml();
       wireManualForm();
+    } else if(mode==='myfoods'){
+      area.innerHTML = `<p class="muted">Loading your saved foods…</p>`;
+      supa(`/rest/v1/my_foods?user_id=eq.${uid}&order=last_used_at.desc&select=*`).then(myFoods => {
+        if(!myFoods.length){ area.innerHTML = `<p class="empty-state">Nothing saved yet — foods you log get added here automatically so you don't have to re-enter them.</p>`; return; }
+        area.innerHTML = `
+          <div class="field"><input type="text" id="myfoods-filter" placeholder="Filter your foods…"></div>
+          <div class="search-results" id="myfoods-results" style="max-height:340px;"></div>
+        `;
+        const renderList = (list) => {
+          $('#myfoods-results').innerHTML = list.map((f,i) => `
+            <div class="search-result" data-idx="${i}" style="display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <div style="font-weight:600;">${esc(f.food_name)}</div>
+                <div class="muted" style="margin-top:2px;">${Math.round(f.calories||0)} cal · ${Math.round(f.protein||0)}g P · ${Math.round(f.carbs||0)}g C · ${Math.round(f.fat||0)}g F</div>
+              </div>
+              <button class="small-btn myfood-remove" data-id="${f.id}" style="flex-shrink:0;">Remove</button>
+            </div>
+          `).join('');
+          $('#myfoods-results').querySelectorAll('.search-result').forEach(el => el.onclick = (evt) => {
+            if(evt.target.closest('.myfood-remove')) return;
+            const f = list[el.dataset.idx];
+            pendingFood = {
+              food_name: f.food_name, calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat,
+              source: f.source || 'my_foods', ingredients_raw: f.ingredients_raw, manual_flags: f.manual_flags || [],
+              servingLabel: 'per your saved amount'
+            };
+            area.innerHTML = manualFormHtml(pendingFood);
+            wireManualForm();
+          });
+          $('#myfoods-results').querySelectorAll('.myfood-remove').forEach(b => b.onclick = async (evt) => {
+            evt.stopPropagation();
+            await supa(`/rest/v1/my_foods?id=eq.${b.dataset.id}`, {method:'DELETE'});
+            renderManualArea('myfoods');
+          });
+        };
+        renderList(myFoods);
+        $('#myfoods-filter').addEventListener('input', (e) => {
+          const q = e.target.value.toLowerCase();
+          renderList(myFoods.filter(f => f.food_name.toLowerCase().includes(q)));
+        });
+      });
     } else if(mode==='search'){
       area.innerHTML = `
         <div class="field"><label>Search USDA food database</label><input type="text" id="usda-q" placeholder="e.g. grilled chicken breast"></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);margin:-6px 0 12px;">
+          <input type="checkbox" id="usda-branded" style="width:auto;"> Include packaged/branded products
+        </label>
         <button class="btn btn-ghost" id="usda-search-btn">Search</button>
         <div class="search-results" id="usda-results"></div>
       `;
       $('#usda-search-btn').onclick = async () => {
         const q = $('#usda-q').value.trim();
         if(!q) return;
+        const includeBranded = $('#usda-branded').checked;
         $('#usda-results').innerHTML = '<p class="muted">Searching…</p>';
         try{
-          const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&query=${encodeURIComponent(q)}&pageSize=8`);
+          const dataTypeParam = includeBranded
+            ? ''
+            : `&dataType=${encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS)')}`;
+          const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&query=${encodeURIComponent(q)}&pageSize=10${dataTypeParam}`);
           const data = await res.json();
           const foods = data.foods || [];
           $('#usda-results').innerHTML = foods.length ? foods.map((f,i)=>{
             const bits = [];
-            if(f.dataType) bits.push(f.dataType);
+            if(f.dataType) bits.push(f.dataType === 'Branded' ? 'Packaged product' : 'Whole food');
             if(f.brandOwner) bits.push(f.brandOwner);
             if(f.foodCategory) bits.push(f.foodCategory);
             if(f.servingSize && f.servingSizeUnit) bits.push(`${f.servingSize}${f.servingSizeUnit} serving`);
@@ -978,7 +1028,7 @@ async function renderFood(panel){
               <div style="font-weight:600;">${esc(f.description)}</div>
               ${bits.length ? `<div class="muted" style="margin-top:2px;">${esc(bits.join(' · '))}</div>` : ''}
             </div>`;
-          }).join('') : '<p class="muted">No results.</p>';
+          }).join('') : `<p class="muted">No results.${!includeBranded ? ' Try checking "Include packaged/branded products" above.' : ''}</p>`;
           $('#usda-results').querySelectorAll('.search-result').forEach(el => el.onclick = async () => {
             const f = foods[el.dataset.idx];
             area.innerHTML = `<p class="muted">Loading serving details for ${esc(f.description)}…</p>`;
@@ -1160,20 +1210,39 @@ async function renderFood(panel){
     }
     $('#save-food').onclick = async () => {
       const qty = parseFloat($('#f-qty')?.value) || 1;
+      const foodName = $('#f-name').value.trim() || 'Untitled food';
+      const finalCal = (parseFloat($('#f-cal').value)||0) * qty;
+      const finalP = (parseFloat($('#f-p').value)||0) * qty;
+      const finalC = (parseFloat($('#f-c').value)||0) * qty;
+      const finalF = (parseFloat($('#f-f').value)||0) * qty;
+      const finalFlags = Array.from(selectedManualFlags);
       const body = {
         user_id: uid, date: foodSelectedDate,
         meal: $('#f-meal').value,
-        food_name: $('#f-name').value.trim() || 'Untitled food',
-        calories: (parseFloat($('#f-cal').value)||0) * qty,
-        protein: (parseFloat($('#f-p').value)||0) * qty,
-        carbs: (parseFloat($('#f-c').value)||0) * qty,
-        fat: (parseFloat($('#f-f').value)||0) * qty,
+        food_name: foodName,
+        calories: finalCal, protein: finalP, carbs: finalC, fat: finalF,
         source: (pendingFood && pendingFood.source) || 'manual',
         barcode: pendingFood?.barcode || null,
         ingredients_raw: pendingFood?.ingredients_raw || null,
-        manual_flags: Array.from(selectedManualFlags)
+        manual_flags: finalFlags
       };
       await supa('/rest/v1/food_logs', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(body)});
+
+      // remember this food for next time (update if a matching name is already saved, otherwise add it)
+      try{
+        const existing = await supa(`/rest/v1/my_foods?user_id=eq.${uid}&food_name=ilike.${encodeURIComponent(foodName)}&select=id`);
+        const myFoodBody = {
+          user_id: uid, food_name: foodName, calories: finalCal, protein: finalP, carbs: finalC, fat: finalF,
+          meal: $('#f-meal').value, source: body.source, ingredients_raw: body.ingredients_raw,
+          manual_flags: finalFlags, last_used_at: new Date().toISOString()
+        };
+        if(existing && existing.length){
+          await supa(`/rest/v1/my_foods?id=eq.${existing[0].id}`, {method:'PATCH', body: JSON.stringify(myFoodBody)});
+        } else {
+          await supa('/rest/v1/my_foods', {method:'POST', body: JSON.stringify(myFoodBody)});
+        }
+      }catch(e){ /* saving to My Foods is a convenience, not critical — don't block the log if it fails */ }
+
       pendingFood = null;
       renderFood(panel);
     };
